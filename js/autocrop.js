@@ -12,6 +12,10 @@
 
 const NUM_ONLY = /^(\d{1,3})[.)]$/;
 const NUM_LEAD = /^(\d{1,3})[.)]\s+\S/;
+// Ortak köklü sorular: "6. ve 7. soruları …", "6 - 9. soruları …", "Aşağıdaki bilgilere göre 3 ve 4. soruları cevaplayınız."
+const INTRO_LEAD = /^\d{1,3}\s*\.?\s*(?:ve|ile|,|-|–|—)\s*\d{1,3}\s*\.?\s*sorular/i;
+const INTRO_ANY = /(\d{1,3})\s*\.?\s*(?:ve|ile|,|-|–|—)\s*(\d{1,3})\s*\.?\s*sorular[ıi]n?[ıi]?|sorular[ıi]\s+(?:aşağıdaki|yukarıdaki)|(?:bilgilere|metne|tabloya|grafiğe|metinlere|görsele|şekle)\s+göre\s+cevaplay[ıi]n[ıi]z/i;
+const INTRO_END = /(cevaplay[ıi]n[ıi]z|yan[ıi]tlay[ıi]n[ıi]z)\s*[.:]?\s*$/i;
 const STOPPER_UP = /(TEST[İI]?\s*B[İI]TT[İI]|TESTİNE\s+GEÇ|SINAV\s+B[İI]TT[İI]|D[İI]ĞER\s+SAYFAYA\s+GEÇ)/i;
 
 /** pdf.js textContent → sayfa koordinatlarında (sol üst köken, pt) öğeler */
@@ -73,8 +77,13 @@ export function detectQuestions(pages, opts = {}) {
       // Satırın başında mı? (hemen solunda aynı satırda yazı olmamalı)
       const leftBusy = p.items.some(o => o !== it && !o.rot && Math.abs(o.base - it.base) < 2 && o.r <= it.x + 0.5 && o.r > it.x - 6);
       if (leftBusy) continue;
+      // "6. ve 7. soruları aşağıdaki bilgilere göre…" gibi ortak kök cümlesi soru numarası değildir
+      const line = p.items.filter(o => !o.rot && Math.abs(o.base - it.base) < 2 && o.x >= it.x - 0.5 && o.x < it.x + p.w * 0.5).sort((a, b) => a.x - b.x).map(o => o.str).join(' ');
+      if (INTRO_LEAD.test(line)) continue;
+      // Cevap anahtarı satırı ("1. A", "1-A 11-C 21-B") soru değildir
+      if (/^\d{1,3}\s*[.)\-:]?\s*[A-E]\s*(?:\s+\d{1,3}\s*[.)\-:]?\s*[A-E]\s*)*$/.test(line)) continue;
       // Ardından metin ya da şekil gelmeli; tek başına "1." satırı (liste/tablo) da olabilir — sırayla elenir.
-      cands.push({ page: pi, n, x: it.x, y: it.y, b: it.b, numR: it.x + numW, size: it.size, it });
+      cands.push({ page: pi, n, x: it.x, y: it.y, b: it.b, numR: it.x + numW, cx: it.x + numW / 2, size: it.size, it });
     }
   }
   if (!cands.length) return { tests: [], questions: [], warnings: ['Soru numarası bulunamadı.'], noText: false };
@@ -86,21 +95,31 @@ export function detectQuestions(pages, opts = {}) {
     if (!cl) { cl = { x: c.x, pages: new Set(), items: [] }; clusters.push(cl); }
     cl.items.push(c); cl.pages.add(c.page);
   }
-  clusters.forEach(k => { k.x = median(k.items.map(i => i.x)); k.score = k.pages.size + k.items.length * 0.01; });
+  clusters.forEach(k => { k.x = median(k.items.map(i => i.x)); k.cx = median(k.items.map(i => i.cx)); k.r = median(k.items.map(i => i.numR)); k.score = k.pages.size + k.items.length * 0.01; });
   clusters.sort((a, b) => b.score - a.score);
   const W = pages[from - 1].w;
   const minPages = Math.max(1, Math.min(3, Math.ceil((to - from + 1) * 0.15)));
+  // Mantıksal sütunlar. Kitaplarda tek/çift sayfaların kenar boşlukları farklı olabilir (aynalı kenar):
+  // aynı sütunun numaraları tek sayfalarda x=40, çift sayfalarda x=58'de durur. Birbirine yakın ve
+  // farklı sayfalarda görülen hizalar aynı sütun sayılır.
   const cols = [];
   for (const k of clusters) {
     if (k.pages.size < minPages && cols.length) continue;
-    if (cols.some(c => Math.abs(c.x - k.x) < W * 0.25)) continue;
-    // Aynı hizadaki numaraların yazı boyutu tutarlı olmalı
-    cols.push(k);
-    if (cols.length >= 3) break;
+    const near = cols.find(c => Math.abs(c.x - k.x) < W * 0.25);
+    if (near) {
+      const overlap = [...k.pages].filter(pg => near.pages.has(pg)).length;
+      if (Math.abs(near.x - k.x) <= 36 && overlap <= Math.max(0, Math.min(k.pages.size, near.pages.size) * 0.1)) {
+        near.members.push(k); k.pages.forEach(pg => near.pages.add(pg)); k.items.forEach(i => near.items.push(i));
+      }
+      continue;
+    }
+    if (cols.length >= 3) continue;
+    cols.push({ x: k.x, pages: new Set(k.pages), items: [...k.items], members: [k] });
   }
   cols.sort((a, b) => a.x - b.x);
   const anchorSize = median(cols.flatMap(c => c.items.map(i => i.size)));
-  const colOf = c => cols.findIndex(k => Math.abs(k.x - c.x) <= 3);
+  // Kutu içinde ortalanmış ya da sağa yaslı numaralar ("9." ile "10." farklı x'te başlar): sol, orta ya da sağ hiza tutsun
+  const colOf = c => cols.findIndex(k => k.members.some(m => Math.abs(m.x - c.x) <= 3 || Math.abs(m.cx - c.cx) <= 1.5 || Math.abs(m.r - c.numR) <= 1.5));
 
   // 3) Okuma sırası + numara sırası kontrolü
   let seq = cands.filter(c => colOf(c) >= 0 && Math.abs(c.size - anchorSize) <= Math.max(1, anchorSize * 0.15));
@@ -130,11 +149,22 @@ export function detectQuestions(pages, opts = {}) {
     cur.questions.push(c);
   });
 
-  // 5) Geometri: sütun sınırları
+  // 5) Geometri: sütun sınırları. Her sayfanın kaydırması (dx) çıkarılarak ortak koordinatta hesaplanır.
+  const dxOf = new Map();
+  for (const pi of new Set(chain.map(c => c.page))) {
+    const ds = chain.filter(c => c.page === pi).map(c => c.x - cols[c.col].x);
+    dxOf.set(pi, median(ds));
+  }
+  const dx = pi => dxOf.get(pi) || 0;
   const leftX = cols[0].x;
+  const bandTop = pi => Math.min(...chain.filter(a => a.page === pi).map(a => a.y)) - 2;
   let rightMax = 0;
-  for (let pi = from - 1; pi < to; pi++) for (const it of pages[pi].items) {
-    if (!it.rot && it.x >= leftX - 2 && it.size <= body * 1.6 && it.b < pages[pi].h * 0.9) rightMax = Math.max(rightMax, it.r);
+  for (const pi of dxOf.keys()) {
+    const top = bandTop(pi), d = dx(pi);
+    for (const it of pages[pi].items) {
+      if (it.rot || it.x - d < leftX - 2 || it.y < top || it.y > pages[pi].h * 0.9) continue;
+      rightMax = Math.max(rightMax, Math.min(it.r, pages[pi].w - 4) - d);
+    }
   }
   const colRight = cols.map((c, ci) => {
     const next = cols[ci + 1];
@@ -143,12 +173,11 @@ export function detectQuestions(pages, opts = {}) {
     // Yalnızca gerçekten iki sütunlu sayfalara bak (tam genişlikteki sayfaların satırları sütun arasını geçer)
     const twoPages = new Set(chain.filter(a => a.col > ci).map(a => a.page));
     for (const pi of twoPages) {
-      const top = Math.min(...chain.filter(a => a.page === pi).map(a => a.y)) - 2;
+      const top = bandTop(pi), d = dx(pi);
       for (const it of pages[pi].items) {
-      if (it.rot || it.x < c.x - 1 || it.r > next.x - 4) continue;
-      if (it.y < top || it.y > pages[pi].h * 0.9) continue;
-      if (it.size > body * 1.6) continue;
-      m = Math.max(m, it.r);
+        if (it.rot || it.x - d < c.x - 1 || it.r - d > next.x - 4) continue;
+        if (it.y < top || it.y > pages[pi].h * 0.9) continue;
+        m = Math.max(m, it.r - d);
       }
     }
     return m ? Math.min(m + 2, next.x - 5) : next.x - 8;
@@ -164,6 +193,7 @@ export function detectQuestions(pages, opts = {}) {
   const footYs = [];
   for (const pi of new Set(chain.map(c => c.page))) { const p = pages[pi]; const ys = p.items.filter(i => i.y > p.h * 0.9).map(i => i.y / p.h); if (ys.length) footYs.push(Math.min(...ys)); }
   const globalFooter = footYs.length >= 3 ? median(footYs) * pages[from - 1].h : Infinity;
+  const colIdx = x => { let k = 0; for (let i = 1; i < cols.length; i++) if (x >= cols[i].x - 6) k = i; return k; };
   const pageInfo = new Map();
   const infoFor = pi => {
     if (pageInfo.has(pi)) return pageInfo.get(pi);
@@ -174,25 +204,63 @@ export function detectQuestions(pages, opts = {}) {
     const noise = p.items.filter(i => i.rot && (repCount.get(repKey(i)) || 0) >= repMin);
     const twoCol = cols.length > 1 && anchors.some(a => a.col > 0);
     // İki sütunlu sayfada sütun arasındaki kısa yazılar (kitapçık harfi, kod) da gürültüdür
-    if (twoCol) p.items.forEach(i => { const cx = (i.x + i.r) / 2; if (cx > colRight[0] - 2 && cx < cols[1].x && (i.rot || i.str.length <= 10)) noise.push(i); });
-    const inf = { anchors, footerTop, stoppers, noise, twoCol };
+    const d = dx(pi);
+    if (twoCol) p.items.forEach(i => { const cx = (i.x + i.r) / 2 - d; if (cx > colRight[0] - 2 && cx < cols[1].x && (i.rot || i.str.length <= 10)) noise.push(i); });
+    // Ortak kök girişleri ("6. ve 7. soruları … cevaplayınız.")
+    const lines = [];
+    const ci = x => twoCol ? colIdx(x - d) : 0;
+    for (const it of p.items) { if (it.rot) continue; const c = ci(it.x); let L = lines.find(l => Math.abs(l.base - it.base) < 2 && l.col === c); if (!L) { L = { base: it.base, col: c, items: [] }; lines.push(L); } L.items.push(it); }
+    lines.forEach(l => { l.items.sort((a, b) => a.x - b.x); l.text = l.items.map(i => i.str).join(' '); l.x = l.items[0].x; l.y = Math.min(...l.items.map(i => i.y)); l.b = Math.max(...l.items.map(i => i.b)); });
+    lines.sort((a, b) => a.col - b.col || a.y - b.y);
+    const intros = [];
+    lines.forEach((l, li) => {
+      if (!INTRO_ANY.test(l.text) || anchors.some(a => Math.abs(a.it.base - l.base) < 2 && a.x <= l.x + 1)) return;
+      // Cümlenin devam ettiği satırlar (en çok 3) — görüntüden silinecek
+      const parts = [l];
+      for (let k = li + 1; k < lines.length && parts.length < 4 && !INTRO_END.test(parts[parts.length - 1].text); k++) {
+        if (lines[k].col !== l.col || lines[k].y - parts[parts.length - 1].b > 8) break;
+        parts.push(lines[k]);
+      }
+      if (!INTRO_END.test(parts[parts.length - 1].text) && !INTRO_LEAD.test(l.text.replace(/^[^\d]*/, ''))) return;
+      const m = l.text.match(/(\d{1,3})\s*\.?\s*(?:ve|ile|,|-|–|—)\s*(\d{1,3})/);
+      intros.push({ y: l.y, x: l.x, col: twoCol ? l.col : 0, from: m ? +m[1] : 0, to: m ? +m[2] : 0, erase: parts.flatMap(pp => pp.items) });
+    });
+    const inf = { anchors, footerTop, stoppers, noise, twoCol, d, intros };
     pageInfo.set(pi, inf);
     return inf;
   };
 
-  const questions = [];
+  // Bir dikdörtgenin içinde başlayan yazılar kesilmesin: sağ sınırı yazının bittiği yere kadar aç
+  const regionText = (p, x0, x1, y0, y1, skip) => p.items.filter(it => !it.rot && it !== skip && it.x >= x0 - 1 && it.x < x1 && it.y >= y0 - 1 && it.b <= y1 + 2);
+  const growRight = (p, inf, col, full, x0, x1, y0, y1) => {
+    const cap = (!full && col < cols.length - 1) ? cols[col + 1].x + inf.d - 6 : p.w - 2;
+    let r = Math.min(x1, cap);
+    for (const it of regionText(p, x0, r, y0, y1)) if (!inf.noise.includes(it)) r = Math.max(r, Math.min(it.r + 1.5, cap));
+    return r;
+  };
+  const textBox = (p, inf, x0, x1, y0, y1, skip, erase = []) => {
+    let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+    for (const it of regionText(p, x0, x1, y0, y1, skip)) {
+      if (inf.noise.includes(it) || erase.includes(it)) continue;
+      bx0 = Math.min(bx0, it.x); by0 = Math.min(by0, it.y); bx1 = Math.max(bx1, it.r); by1 = Math.max(by1, it.b);
+    }
+    return bx0 < Infinity ? { x: bx0, y: by0, r: bx1, b: by1 } : null;
+  };
+
+  const questions = [], stems = [];
   tests.forEach((t, ti) => {
     t.index = ti;
     t.questions = t.questions.map(c => {
       const p = pages[c.page], inf = infoFor(c.page);
       const full = !inf.twoCol;
       let x0 = c.numR + 1.5;
-      const x1 = full ? rightMax + 2 : colRight[c.col];
+      let x1 = (full ? rightMax + 2 : colRight[c.col]) + inf.d;
       const y0 = c.y - 3;
-      // Sonraki numara: aynı sütunda altta (tam genişlikte: herhangi sütunda altta)
+      // Sonraki numara ya da ortak kök girişi: aynı sütunda altta (tam genişlikte: herhangi sütunda altta)
       const below = inf.anchors.filter(a => a !== c && a.y > c.y + 2 && (full || a.col === c.col)).map(a => a.y);
+      const intro = inf.intros.filter(o => o.y > c.y + 2 && (full || o.col === c.col)).map(o => o.y);
       const stop = inf.stoppers.filter(s => s.y > c.b && s.r > x0 && s.x < x1).map(s => s.y);
-      const y1 = Math.min(inf.footerTop, ...below, ...stop) - 3;
+      const y1 = Math.min(inf.footerTop, ...below, ...intro, ...stop) - 3;
       // Soru metni numaranın bittiği yerden önce başlıyorsa (asılı girinti yoksa) sol sınırı metne göre al
       let minX = Infinity;
       for (const it of p.items) {
@@ -200,11 +268,44 @@ export function detectQuestions(pages, opts = {}) {
         if (it.x < minX) minX = it.x;
       }
       if (minX < x0) x0 = Math.max(c.x + 2, minX - 1);
-      const q = { test: ti, n: c.n, page: c.page, rect: { x: x0, y: y0, w: Math.max(10, x1 - x0), h: Math.max(10, y1 - y0) }, full, contentW: rightMax - leftX, noise: inf.noise };
+      x1 = growRight(p, inf, c.col, full, x0, x1, y0, y1);
+      const q = { test: ti, n: c.n, page: c.page, col: c.col, rect: { x: x0, y: y0, w: Math.max(10, x1 - x0), h: Math.max(10, y1 - y0) }, full, contentW: rightMax - leftX, noise: inf.noise, text: (tb => tb && { ...tb, y: Math.min(tb.y, c.y) })(textBox(p, inf, x0, x1, y0, y1, c.it)), stem: -1 };
       questions.push(q);
       return q;
     });
   });
+
+  // Ortak kökler: giriş cümlesinden ilgili ilk sorunun numarasına kadar olan bölüm, gruptaki her soruya eklenir
+  for (const pi of new Set(chain.map(c => c.page))) {
+    const p = pages[pi], inf = infoFor(pi);
+    for (const o of inf.intros) {
+      const full = !inf.twoCol;
+      let x0 = (full || o.col === 0 ? cols[0].x : cols[o.col].x) + inf.d;
+      let x1 = (full ? rightMax + 2 : colRight[o.col]) + inf.d;
+      // Giriş metni numara hizasının solundan başlayabilir
+      x0 = Math.min(x0, o.x) - 1.5;
+      const prevR = (!full && o.col > 0) ? colRight[o.col - 1] + inf.d + 1 : 0;
+      x0 = Math.max(x0, prevR);
+      const y0 = o.y - 3;
+      const below = inf.anchors.filter(a => a.y > o.y + 2 && (full || a.col === o.col)).map(a => a.y);
+      const y1 = Math.min(inf.footerTop, ...below) - 3;
+      if (y1 - y0 < 6) continue;
+      for (const it of regionText(p, x0 - 12, x1, y0, y1)) if (!inf.noise.includes(it) && it.x < x0 + 1 && it.x > prevR) x0 = it.x - 1.5;
+      x1 = growRight(p, inf, o.col, full, x0, x1, y0, y1);
+      const si = stems.length;
+      stems.push({ page: pi, rect: { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }, erase: o.erase, noise: inf.noise, text: textBox(p, inf, x0, x1, y0, y1, null, o.erase) });
+      // Hangi sorular? Numaralar verildiyse onlar; verilmediyse girişten sonraki ilk iki soru
+      const qc = q => (infoFor(q.page).twoCol ? q.col : 0);
+      const after = questions.filter(q => q.page > pi || (q.page === pi && (qc(q) > o.col || (qc(q) === o.col && q.rect.y > o.y))));
+      let grp = [];
+      if (o.from && o.to >= o.from && o.to - o.from < 12) {
+        const firstAfter = after[0];
+        grp = firstAfter ? after.filter(q => q.test === firstAfter.test && q.n >= o.from && q.n <= o.to) : [];
+      }
+      if (!grp.length) grp = after.slice(0, 2);
+      grp.forEach(q => { if (q.stem < 0) q.stem = si; });
+    }
+  }
 
   // 6) Test adları (sayfa üstü başlıklar)
   tests.forEach(t => {
@@ -267,7 +368,7 @@ export function detectQuestions(pages, opts = {}) {
   if (key) qTests.forEach((t, i) => { t.anahtar = key.cols[i] || ''; t.anahtarKaynak = 'anahtar'; });
   fillFromSolutions(tests);
 
-  return { colRight, tests, questions, warnings, anahtarSayfa: key ? key.page + 1 : 0, body, cols: cols.map(c => c.x) };
+  return { colRight, tests, questions, stems, warnings, anahtarSayfa: key ? key.page + 1 : 0, body, cols: cols.map(c => c.x) };
 }
 
 /** Her çözüm bölümünü, aynı sayıda sorusu olan (tercihen önceki) soru testine bağla */
@@ -481,8 +582,89 @@ export function cropQuestion(pageCanvas, q, scale, opts = {}) {
   ctx.drawImage(pageCanvas, x, y, w, h, 0, 0, w, h);
   ctx.fillStyle = '#fff';
   for (const n of q.noise || []) ctx.fillRect(n.x * scale - x - 2, n.y * scale - y - 2, (n.r - n.x) * scale + 4, (n.b - n.y) * scale + 4);
+  for (const n of q.erase || []) ctx.fillRect(n.x * scale - x - 2, n.y * scale - y - 2, (n.r - n.x) * scale + 4, (n.b - n.y) * scale + 4);
   if (opts.watermark) removeWatermark(c, opts.watermark);
+  if (q.text) dropStrays(c, { x: q.text.x * scale - x, y: q.text.y * scale - y, r: q.text.r * scale - x, b: q.text.b * scale - y }, scale);
   let out = opts.trim ? opts.trim(c, 2) : c;
   out = sweepEdges(out, scale);
   return opts.trim ? opts.trim(out, Math.round(3 * scale)) : out;
+}
+
+/**
+ * Kesim kenarına değen ve sorunun yazı alanının (numaradan son şıkka kadar) neredeyse tamamen dışında kalan
+ * mürekkep parçalarını sil:
+ * sayfa süsleri, yan sekmeler, numara kutusunun kalan parçası, komşu sorudan taşan çizgiler.
+ * Yazı alanının içinde ya da ona değen şekiller (grafik, tablo, resim) korunur.
+ */
+export function dropStrays(c, box, scale) {
+  const w = c.width, h = c.height;
+  if (w < 8 || h < 8) return c;
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  const im = ctx.getImageData(0, 0, w, h), d = im.data;
+  const f = 2, W2 = Math.ceil(w / f), H2 = Math.ceil(h / f);
+  const mask = new Uint8Array(W2 * H2);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = (y * w + x) * 4;
+    if (d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114 < 242) mask[(y / f | 0) * W2 + (x / f | 0)] = 1;
+  }
+  const lab = new Int32Array(W2 * H2), stack = new Int32Array(W2 * H2);
+  const mg = 3 * scale;
+  const bx0 = box.x - mg, by0 = box.y - mg, bx1 = box.r + mg, by1 = box.b + mg;
+  let id = 0, changed = false;
+  for (let s0 = 0; s0 < mask.length; s0++) {
+    if (!mask[s0] || lab[s0]) continue;
+    id++;
+    let sp = 0, n = 0; stack[sp++] = s0; lab[s0] = id;
+    let x0 = W2, y0 = H2, x1 = -1, y1 = -1;
+    const cells = [];
+    while (sp) {
+      const k = stack[--sp]; cells.push(k); n++;
+      const cx = k % W2, cy = (k / W2) | 0;
+      if (cx < x0) x0 = cx; if (cx > x1) x1 = cx; if (cy < y0) y0 = cy; if (cy > y1) y1 = cy;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const nx = cx + dx, ny = cy + dy;
+        if (nx < 0 || ny < 0 || nx >= W2 || ny >= H2) continue;
+        const nk = ny * W2 + nx;
+        if (mask[nk] && !lab[nk]) { lab[nk] = id; stack[sp++] = nk; }
+      }
+    }
+    // Yalnızca kesim kenarına değen parçalar aday: kenara değmeyen şekiller (şık resimleri, grafikler) her zaman korunur
+    const touches = x0 === 0 || y0 === 0 || x1 === W2 - 1 || y1 === H2 - 1;
+    const px0 = x0 * f, py0 = y0 * f, px1 = (x1 + 1) * f, py1 = (y1 + 1) * f;
+    if (!touches) {
+      // Kenara değmeyen ince süs (kıvrık çizgi, dikey ayraç): yazı alanının tamamen yanındaysa sil
+      const thin = Math.min(px1 - px0, py1 - py0) <= 10 * scale && Math.max(px1 - px0, py1 - py0) <= 120 * scale;
+      const beside = px0 >= box.r - 2 * scale || px1 <= box.x + 2 * scale;
+      if (!(thin && beside)) continue;
+      changed = true;
+      for (const k of cells) { const cx = (k % W2) * f, cy = ((k / W2) | 0) * f; for (let yy = cy; yy < Math.min(h, cy + f); yy++) for (let xx = cx; xx < Math.min(w, cx + f); xx++) { const i = (yy * w + xx) * 4; d[i] = d[i + 1] = d[i + 2] = 255; } }
+      continue;
+    }
+    const meets = px1 >= bx0 && px0 <= bx1 && py1 >= by0 && py0 <= by1;
+    if (meets) {
+      // Çoğu yazı alanının dışında kalan parçalar (ör. sütun çizgisine yapışık süs) de silinir
+      let inside = 0;
+      for (const k of cells) { const cx = (k % W2) * f, cy = ((k / W2) | 0) * f; if (cx >= bx0 && cx <= bx1 && cy >= by0 && cy <= by1) inside++; }
+      if (inside > cells.length * 0.1) continue;
+    }
+    changed = true;
+    for (const k of cells) {
+      const cx = (k % W2) * f, cy = ((k / W2) | 0) * f;
+      for (let yy = cy; yy < Math.min(h, cy + f); yy++) for (let xx = cx; xx < Math.min(w, cx + f); xx++) {
+        const i = (yy * w + xx) * 4; d[i] = d[i + 1] = d[i + 2] = 255;
+      }
+    }
+  }
+  if (changed) ctx.putImageData(im, 0, 0);
+  return c;
+}
+
+/** Ortak kök görüntüsünü sorunun üstüne ekle (sola hizalı, arada boşluk) */
+export function stackStem(stem, qc, gap) {
+  const o = document.createElement('canvas');
+  o.width = Math.max(stem.width, qc.width); o.height = stem.height + gap + qc.height;
+  const ctx = o.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, o.width, o.height);
+  ctx.drawImage(stem, 0, 0); ctx.drawImage(qc, 0, stem.height + gap);
+  return o;
 }

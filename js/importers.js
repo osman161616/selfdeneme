@@ -31,8 +31,11 @@ export function parseName(fname) {
   return { cevap: LETTERS.includes(last) ? last : '', yatayByName: fname.startsWith('y') };
 }
 
-export function newQuestion({ ders, konu, zorluk, ad, cevap, yatay, blob, w, h, kaynak = '' }) {
-  return { id: uid('q'), ders: ders.trim(), konu: konu.trim(), zorluk: String(zorluk), ad: uniqueName(ders.trim(), konu.trim(), ad), cevap: cevap || '', yatay: !!yatay, img: blob, w, h, created: Date.now(), kaynak, analiz: false };
+export function newQuestion({ ders, konu, zorluk, ad, cevap, yatay, blob, w, h, mmw, kaynak = '' }) {
+  const q = { id: uid('q'), ders: ders.trim(), konu: konu.trim(), zorluk: String(zorluk), ad: uniqueName(ders.trim(), konu.trim(), ad), cevap: cevap || '', yatay: !!yatay, img: blob, w, h, created: Date.now(), kaynak, analiz: false };
+  // Kaynaktaki basılı genişlik (mm): soru kitapçıkta orijinal yazı boyutuyla basılır
+  if (mmw > 5) q.mmw = mmw;
+  return q;
 }
 
 /** Dosyaları (File ya da {path, blob}) yollarıyla birlikte normalize et */

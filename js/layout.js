@@ -19,7 +19,10 @@ function geom() {
 /** Soru görselinin yerleşim boyutu (mm) */
 function itemSize(q, g) {
   const maxH = g.y1 - g.y0 - 12;
-  const w = q.yatay ? g.W - GUTTER : g.colW - GUTTER;
+  const tam = q.yatay ? g.W - GUTTER : g.colW - GUTTER;
+  // Kaynağındaki basılı genişliği bilinen sorular orijinal yazı boyutuyla basılır (sütuna sığmazsa küçültülür);
+  // bilinmeyenler (eski banka, fotoğraf) sütun genişliğine yayılır.
+  const w = q.mmw && state.settings.soruBoyut !== 'sutun' ? Math.min(tam, q.mmw) : tam;
   let h = w * (q.h / q.w);
   let ww = w;
   if (h > maxH) { ww = w * maxH / h; h = maxH; }

@@ -25,6 +25,7 @@ export const DEFAULT_SETTINGS = {
   soruNoPunto: 12,
   sayfaNoPunto: 10,
   dersYeniSayfa: true,
+  soruBoyut: 'orijinal',
   ogrenciAdiYaz: true,
   secenekSayisi: 4,
   noHane: 6,

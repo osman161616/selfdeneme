@@ -54,6 +54,7 @@ export async function render(host) {
       <label class="fld"><span>Sayfa numarası (punto)</span><input id="s-pp" type="number" min="6" max="20" value="${s.sayfaNoPunto}"></label>
     </div><div class="stack" style="margin-top:12px">
       <label class="check"><input type="checkbox" id="s-dy" ${s.dersYeniSayfa ? 'checked' : ''}> Her ders yeni sayfada başlasın</label>
+      <label class="check"><input type="checkbox" id="s-sb" ${s.soruBoyut === 'sutun' ? 'checked' : ''}> Soruları sütun genişliğine büyüt <small class="muted">(kapalıyken PDF'ten kesilen sorular kitaptaki yazı boyutuyla basılır)</small></label>
       <label class="check"><input type="checkbox" id="s-oa" ${s.ogrenciAdiYaz !== false ? 'checked' : ''}> Kişisel belgelerde öğrenci adını sayfa başına yaz</label></div></section>
     <section class="card"><h3>Optik form</h3><div class="form-grid">
       <label class="fld"><span>Şık sayısı <small>(serbest denemeler)</small></span><select id="s-sec"><option value="5" ${+s.secenekSayisi === 5 ? 'selected' : ''}>5 (A–E)</option><option value="4" ${+s.secenekSayisi === 4 ? 'selected' : ''}>4 (A–D)</option></select></label>
@@ -100,6 +101,7 @@ export async function render(host) {
   $('#s-dpi', host).addEventListener('change', e => save({ dpi: Number(e.target.value) }));
   num('#s-kenar', 'kenar', 5, 25); num('#s-ara', 'soruArasi', 2, 30); num('#s-bp', 'baslikPunto', 8, 30); num('#s-sp', 'soruNoPunto', 7, 24); num('#s-pp', 'sayfaNoPunto', 6, 20);
   $('#s-dy', host).addEventListener('change', e => save({ dersYeniSayfa: e.target.checked }));
+  $('#s-sb', host).addEventListener('change', e => save({ soruBoyut: e.target.checked ? 'sutun' : 'orijinal' }));
   $('#s-oa', host).addEventListener('change', e => save({ ogrenciAdiYaz: e.target.checked }));
   $('#s-sec', host).addEventListener('change', e => save({ secenekSayisi: Number(e.target.value) }));
   num('#s-hane', 'noHane', 3, 10);

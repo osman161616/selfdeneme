@@ -1,7 +1,7 @@
 import { state, saveQuestions, deleteQuestions, dersList, konuList } from '../db.js';
 import { esc, $, $$, pickFiles, makeCanvas, trimCanvas, canvasToBlob, LETTERS } from '../util.js';
 import { toast, progress, guard, alertDlg, confirmDlg, modal } from '../ui.js';
-import { normalizeItems, detectQuestions, matchDers, parseKeyText, renderPage, detectWatermark, cropQuestion, removeWatermark } from '../autocrop.js';
+import { normalizeItems, detectQuestions, matchDers, parseKeyText, renderPage, detectWatermark, cropQuestion, removeWatermark, stackStem } from '../autocrop.js';
 import { LISE_DERSLER, ORTAOKUL_DERSLER } from '../sinavlar.js';
 import { loadPdfJs, imageFileToCanvas } from '../omr.js';
 import { newQuestion } from '../importers.js';
@@ -80,6 +80,7 @@ async function pageCanvas(p) {
   }
   const page = await p.src.doc.getPage(p.index);
   const vp0 = page.getViewport({ scale: 1 });
+  p.ptW = vp0.width;
   const scale = 2000 / vp0.width;
   const vp = page.getViewport({ scale });
   const c = makeCanvas(vp.width, vp.height);
@@ -231,7 +232,8 @@ async function saveSel(host) {
   const blob = await canvasToBlob(c, 'image/png');
   const p = S.pages[S.cur];
   const base = p.src.name.replace(/\.[^.]+$/, '').slice(0, 30);
-  const q = newQuestion({ ders: S.ders, konu: S.konu, zorluk: S.zorluk, ad: `${base}_s${p.index}_${(S.saved.length + 1)}${S.cevap ? '_' + S.cevap.toLowerCase() : ''}.png`, cevap: S.cevap, yatay: S.yatay, blob, w: c.width, h: c.height, kaynak: p.src.name });
+  const mmw = p.src.type === 'pdf' && p.ptW ? +(c.width * (p.ptW / S.canvas.width) * 25.4 / 72).toFixed(2) : undefined;
+  const q = newQuestion({ ders: S.ders, konu: S.konu, zorluk: S.zorluk, ad: `${base}_s${p.index}_${(S.saved.length + 1)}${S.cevap ? '_' + S.cevap.toLowerCase() : ''}.png`, cevap: S.cevap, yatay: S.yatay, blob, w: c.width, h: c.height, mmw, kaynak: p.src.name });
   await saveQuestions([q]);
   S.saved.push({ id: q.id, page: p, r: { ...S.sel }, label: `${S.saved.length + 1}${S.cevap ? ' · ' + S.cevap : ''}` });
   toast(`Kaydedildi: ${S.ders} › ${S.konu} · Z${S.zorluk}${S.cevap ? ' · ' + S.cevap : ' · cevapsız'}`);
@@ -287,16 +289,20 @@ async function runAuto(host, src) {
       }
       wm = detectWatermark(raws);
     }
-    const crops = new Map();
+    const crops = new Map(), stemC = new Map();
+    const stems = res.stems || [];
+    const allPages = [...new Set([...byPage.keys(), ...stems.map(st => st.page)])].sort((a, b) => a - b);
     let k = 0;
-    for (const [pi, qs] of byPage) {
+    for (const pi of allPages) {
       const c = await renderPage(await doc.getPage(pi + 1), scale);
-      for (const q of qs) {
-        const cv = cropQuestion(c, q, scale, { watermark: wm, trim: trimCanvas });
+      stems.forEach((st, si) => { if (st.page === pi) stemC.set(si, cropQuestion(c, st, scale, { watermark: wm, trim: trimCanvas })); });
+      for (const q of byPage.get(pi) || []) {
+        let cv = cropQuestion(c, q, scale, { watermark: wm, trim: trimCanvas });
+        if (q.stem >= 0 && stemC.has(q.stem)) cv = stackStem(stemC.get(q.stem), cv, Math.round(8 * scale));
         const blob = await canvasToBlob(cv, 'image/png');
-        crops.set(q, { blob, w: cv.width, h: cv.height });
+        crops.set(q, { blob, w: cv.width, h: cv.height, mmw: +(cv.width / scale * 25.4 / 72).toFixed(2) });
       }
-      k++; pg.set(0.25 + 0.75 * k / byPage.size, `Sorular kesiliyor (${k}/${byPage.size} sayfa)`);
+      k++; pg.set(0.25 + 0.75 * k / allPages.length, `Sorular kesiliyor (${k}/${allPages.length} sayfa)`);
     }
     const dersler = knownDersler();
     const old = S.auto && S.auto.src === src ? S.auto : null;
@@ -319,7 +325,7 @@ async function runAuto(host, src) {
         const t = res.tests[q.test];
         const L0 = (t.anahtar || '')[t.questions.indexOf(q)] || '';
         const L = /^[A-E]$/.test(L0) ? L0 : '';
-        return { q, pw: pages[q.page].w, test: q.test, n: q.n, blob: c.blob, w: c.w, h: c.h, url: URL.createObjectURL(c.blob), cevap: L, yatay: q.full && c.w / (q.contentW * scale) > 0.62, include: t.tur !== 'cozum', konu: '', saved: false };
+        return { q, pw: pages[q.page].w, test: q.test, n: q.n, blob: c.blob, w: c.w, h: c.h, mmw: c.mmw, stem: q.stem >= 0, url: URL.createObjectURL(c.blob), cevap: L, yatay: q.full && c.w / (q.contentW * scale) > 0.62, include: t.tur !== 'cozum', konu: '', saved: false };
       }),
     };
     S.autoView = true;
@@ -481,7 +487,7 @@ async function saveAuto(host) {
   const qs = list.map(it => {
     const t = A.tests[it.test];
     const kisa = ((t.ders || 'test').split(/\s+/).map(w => w.replace(/[^\wçğıöşüÇĞİÖŞÜ]/g, '')).find(w => w.length > 2) || 'test').slice(0, 10);
-    return { it, q: newQuestion({ ders: t.ders, konu: (it.konu.trim() || t.konu.trim()), zorluk: t.zorluk, ad: `${base}_${kisa}_${String(it.n).padStart(2, '0')}${it.cevap ? '_' + it.cevap.toLowerCase() : ''}.png`, cevap: it.cevap, yatay: it.yatay, blob: it.blob, w: it.w, h: it.h, kaynak: A.src.name }) };
+    return { it, q: newQuestion({ ders: t.ders, konu: (it.konu.trim() || t.konu.trim()), zorluk: t.zorluk, ad: `${base}_${kisa}_${String(it.n).padStart(2, '0')}${it.cevap ? '_' + it.cevap.toLowerCase() : ''}.png`, cevap: it.cevap, yatay: it.yatay, blob: it.blob, w: it.w, h: it.h, mmw: it.mmw, kaynak: A.src.name }) };
   });
   // Aynı oturumda isim çakışmasını önlemek için tek tek kaydet (uniqueName kayıtlı soruları görür)
   const pg = progress('Bankaya kaydediliyor');
