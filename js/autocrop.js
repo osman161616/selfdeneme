@@ -14,8 +14,9 @@ const NUM_ONLY = /^(\d{1,3})[.)]$/;
 const NUM_LEAD = /^(\d{1,3})[.)]\s+\S/;
 // Ortak köklü sorular: "6. ve 7. soruları …", "6 - 9. soruları …", "Aşağıdaki bilgilere göre 3 ve 4. soruları cevaplayınız."
 const INTRO_LEAD = /^\d{1,3}\s*\.?\s*(?:ve|ile|,|-|–|—)\s*\d{1,3}\s*\.?\s*sorular/i;
+const INTRO_EN = /questions?\s*\(?\s*\d{1,3}\s*(?:-|–|—|and|&)\s*\d{1,3}\s*\)?\s*(?:according|based|using|on)/i;
 const INTRO_ANY = /(\d{1,3})\s*\.?\s*(?:ve|ile|,|-|–|—)\s*(\d{1,3})\s*\.?\s*sorular[ıi]n?[ıi]?|sorular[ıi]\s+(?:aşağıdaki|yukarıdaki)|(?:bilgilere|metne|tabloya|grafiğe|metinlere|görsele|şekle)\s+göre\s+cevaplay[ıi]n[ıi]z/i;
-const INTRO_END = /(cevaplay[ıi]n[ıi]z|yan[ıi]tlay[ıi]n[ıi]z)\s*[.:]?\s*$/i;
+const INTRO_END = /(cevaplay[ıi]n[ıi]z|yan[ıi]tlay[ıi]n[ıi]z|below|above)\s*[.:]?\s*$/i;
 const STOPPER_UP = /(TEST[İI]?\s*B[İI]TT[İI]|TESTİNE\s+GEÇ|SINAV\s+B[İI]TT[İI]|D[İI]ĞER\s+SAYFAYA\s+GEÇ)/i;
 
 /** pdf.js textContent → sayfa koordinatlarında (sol üst köken, pt) öğeler */
@@ -45,6 +46,38 @@ export function normalizeItems(items, W, H) {
   return out;
 }
 
+/** Sayfadaki resimlerin yerleri (sol üst köken, pt). Resimler metin katmanında görünmez; kesim sınırları ve filigran temizliği için gerekir. */
+export async function pageImages(page, OPS) {
+  const out = [];
+  try {
+    const ol = await page.getOperatorList();
+    const [vx0, vy0, vx1, vy1] = page.view, W = vx1 - vx0, H = vy1 - vy0;
+    const mul = (m, n) => [m[0] * n[0] + m[2] * n[1], m[1] * n[0] + m[3] * n[1], m[0] * n[2] + m[2] * n[3], m[1] * n[2] + m[3] * n[3], m[0] * n[4] + m[2] * n[5] + m[4], m[1] * n[4] + m[3] * n[5] + m[5]];
+    let ctm = [1, 0, 0, 1, 0, 0];
+    const st = [];
+    const IMG = new Set([OPS.paintImageXObject, OPS.paintInlineImageXObject, OPS.paintImageMaskXObject, OPS.paintJpegXObject].filter(v => v !== undefined));
+    for (let i = 0; i < ol.fnArray.length; i++) {
+      const fn = ol.fnArray[i], a = ol.argsArray[i];
+      if (fn === OPS.save) st.push(ctm);
+      else if (fn === OPS.restore) ctm = st.pop() || ctm;
+      else if (fn === OPS.transform) ctm = mul(ctm, a);
+      else if (fn === OPS.paintFormXObjectBegin) { st.push(ctm); const m = a && a[0]; if (m && m.length === 6) ctm = mul(ctm, m); }
+      else if (fn === OPS.paintFormXObjectEnd) ctm = st.pop() || ctm;
+      else if (IMG.has(fn)) {
+        const pts = [[0, 0], [1, 0], [0, 1], [1, 1]].map(([u, v]) => [ctm[0] * u + ctm[2] * v + ctm[4], ctm[1] * u + ctm[3] * v + ctm[5]]);
+        const xs = pts.map(p => p[0] - vx0), ys = pts.map(p => H - (p[1] - vy0));
+        const r = { x: Math.max(0, Math.min(...xs)), y: Math.max(0, Math.min(...ys)), r: Math.min(W, Math.max(...xs)), b: Math.min(H, Math.max(...ys)) };
+        const area = (r.r - r.x) * (r.b - r.y);
+        // Sayfa arka planı / tam sayfa filigran resimleri ve minik süsler sayılmaz
+        const edge = ((r.x < 12 || r.r > W - 12) && r.r - r.x < W * 0.25)   // sayfa kenarındaki sekme/şerit
+          || (r.r - r.x > W * 0.8 && r.b - r.y < 40);                      // sayfa boyu yatay şerit (üst/alt bilgi süsü)
+        if (!edge && area > 60 && area < W * H * 0.35 && r.r - r.x > 6 && r.b - r.y > 6) out.push(r);
+      }
+    }
+  } catch { /* operatör listesi okunamazsa resimsiz devam */ }
+  return out;
+}
+
 function median(a) { if (!a.length) return 0; const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; }
 
 /**
@@ -61,6 +94,12 @@ export function detectQuestions(pages, opts = {}) {
   const sizes = [];
   pages.forEach(p => p.items.forEach(i => { if (!i.rot && i.str.length > 3) sizes.push(Math.round(i.size * 2) / 2); }));
   const body = median(sizes) || 10;
+
+  // Her sayfada aynı yerde, aynı boyda duran resimler (arka plan amblemi, filigran, süs) içerik sayılmaz
+  const imgKey = im => [im.x, im.y, im.r, im.b].map(v => Math.round(v / 6)).join(',');
+  const imgRep = new Map();
+  pages.forEach(p => { const seen = new Set(); (p.imgs || []).forEach(im => { const k = imgKey(im); if (!seen.has(k)) { seen.add(k); imgRep.set(k, (imgRep.get(k) || 0) + 1); } }); });
+  pages.forEach(p => { if (p.imgs) p.imgs = p.imgs.filter(im => (imgRep.get(imgKey(im)) || 0) < 3); });
 
   // 1) Aday numaralar
   const cands = [];
@@ -88,53 +127,55 @@ export function detectQuestions(pages, opts = {}) {
   }
   if (!cands.length) return { tests: [], questions: [], warnings: ['Soru numarası bulunamadı.'], noText: false };
 
-  // 2) Sütun başı hizaları: aynı x'te en çok sayfada görülen numaralar
+  // 2) Numara imzası. Her sayfada aynı yerde tekrar eden "numaralar" (ör. sayfa başlığındaki "8. Sınıf") soru değildir.
+  const repC = new Map();
+  const rk = c => c.it.str + '@' + Math.round(c.x / 4) + ',' + Math.round(c.y / 4);
+  cands.forEach(c => { const k = rk(c); if (!repC.has(k)) repC.set(k, new Set()); repC.get(k).add(c.page); });
+  // (Yalnızca numaradan sonra yazı da içeren öğeler: tek başına "1." her testin ilk sorusunda aynı yerde durabilir.)
+  const repLim = Math.max(3, Math.ceil(textPages * 0.4));
+  const cand2 = cands.filter(c => !(NUM_LEAD.test(c.it.str) && repC.get(rk(c)).size >= repLim) && !/^\d+\s*[.)]\s*s[ıi]n[ıi]f/i.test(c.it.str));
+  if (!cand2.length) return { tests: [], questions: [], warnings: ['Soru numarası bulunamadı.'], noText: false };
+  // Aynı hizada en çok sayfada görülen numaralar soru numaralarının yazı boyutunu ve biçimini ("1." mi "1)" mi) verir
   const clusters = [];
-  for (const c of cands) {
+  for (const c of cand2) {
     let cl = clusters.find(k => Math.abs(k.x - c.x) <= 3);
     if (!cl) { cl = { x: c.x, pages: new Set(), items: [] }; clusters.push(cl); }
     cl.items.push(c); cl.pages.add(c.page);
   }
   clusters.forEach(k => { k.x = median(k.items.map(i => i.x)); k.cx = median(k.items.map(i => i.cx)); k.r = median(k.items.map(i => i.numR)); k.score = k.pages.size + k.items.length * 0.01; });
   clusters.sort((a, b) => b.score - a.score);
-  const W = pages[from - 1].w;
-  const minPages = Math.max(1, Math.min(3, Math.ceil((to - from + 1) * 0.15)));
-  // Mantıksal sütunlar. Kitaplarda tek/çift sayfaların kenar boşlukları farklı olabilir (aynalı kenar):
-  // aynı sütunun numaraları tek sayfalarda x=40, çift sayfalarda x=58'de durur. Birbirine yakın ve
-  // farklı sayfalarda görülen hizalar aynı sütun sayılır.
-  const cols = [];
-  for (const k of clusters) {
-    if (k.pages.size < minPages && cols.length) continue;
-    const near = cols.find(c => Math.abs(c.x - k.x) < W * 0.25);
-    if (near) {
-      const overlap = [...k.pages].filter(pg => near.pages.has(pg)).length;
-      if (Math.abs(near.x - k.x) <= 36 && overlap <= Math.max(0, Math.min(k.pages.size, near.pages.size) * 0.1)) {
-        near.members.push(k); k.pages.forEach(pg => near.pages.add(pg)); k.items.forEach(i => near.items.push(i));
-      }
-      continue;
-    }
-    if (cols.length >= 3) continue;
-    cols.push({ x: k.x, pages: new Set(k.pages), items: [...k.items], members: [k] });
-  }
-  cols.sort((a, b) => a.x - b.x);
-  const anchorSize = median(cols.flatMap(c => c.items.map(i => i.size)));
-  // Kutu içinde ortalanmış ya da sağa yaslı numaralar ("9." ile "10." farklı x'te başlar): sol, orta ya da sağ hiza tutsun
-  const colOf = c => cols.findIndex(k => k.members.some(m => Math.abs(m.x - c.x) <= 3 || Math.abs(m.cx - c.cx) <= 1.5 || Math.abs(m.r - c.numR) <= 1.5));
+  const punct = c => (c.it.str.match(/^\d+\s*([.)])/) || [])[1] || '.';
+  const top = clusters[0];
+  const anchorSize = median(top.items.map(i => i.size));
+  const pc = new Map(); top.items.forEach(i => pc.set(punct(i), (pc.get(punct(i)) || 0) + 1));
+  const anchorPunct = [...pc].sort((a, b) => b[1] - a[1])[0][0];
+  // Soru numaraları belge boyunca aynı boyuttadır; kapak/uyarı listelerinin numaraları genelde bir punto küçüktür
+  const sig = c => Math.abs(c.size - anchorSize) <= Math.max(0.5, anchorSize * 0.06) && punct(c) === anchorPunct;
+  // Hizalı mı? Birden çok sayfada görülen bir hizada ya da aynı sayfada başka bir numarayla aynı hizada.
+  // (Kutu içinde ortalanmış numaralarda "9." ile "10." farklı x'te başlar: orta ya da sağ hiza da sayılır.)
+  const near = (m, c) => Math.abs(m.x - c.x) <= 3 || Math.abs(m.cx - c.cx) <= 1.5 || Math.abs(m.r - c.numR) <= 1.5;
+  const strong = clusters.filter(k => k.pages.size >= 2);
+  const seq = cand2.filter(sig);
+  seq.forEach(c => {
+    c.col = c.x < pages[c.page].w * 0.4 ? 0 : 1;
+    c.aligned = strong.some(k => near(k, c)) || seq.some(o => o !== c && o.page === c.page && near(o, c));
+  });
 
-  // 3) Okuma sırası + numara sırası kontrolü
-  let seq = cands.filter(c => colOf(c) >= 0 && Math.abs(c.size - anchorSize) <= Math.max(1, anchorSize * 0.15));
-  seq.forEach(c => { c.col = colOf(c); });
+  // 3) Okuma sırası + numara sırası: en uzun tutarlı zincir (her adım n+1, ya da yeni test: 1)
   seq.sort((a, b) => a.page - b.page || a.col - b.col || a.y - b.y);
-  // En uzun tutarlı zincir (her adım n+1, ya da yeni test: 1)
   const N = seq.length, best = new Array(N).fill(1), prev = new Array(N).fill(-1);
   for (let i = 0; i < N; i++) {
-    for (let j = Math.max(0, i - 40); j < i; j++) {
-      const a = seq[j], b = seq[i];
-      const ok = b.n === a.n + 1 || (b.n === 1 && a.n >= 2) || (b.n === a.n + 2) || (b.n === a.n + 3);
-      if (!ok) continue;
-      const gain = best[j] + (b.n === a.n + 1 || b.n === 1 ? 1 : 0.4);
-      if (gain > best[i]) { best[i] = gain; prev[i] = j; }
+    const bi = seq[i], w = bi.aligned ? 1 : 0.25;
+    for (let j = Math.max(0, i - 60); j < i; j++) {
+      const a = seq[j];
+      let g;
+      if (bi.n === a.n + 1) g = w;
+      else if (bi.n === 1 && a.n >= 2) g = w;
+      else if (bi.n === a.n + 2 || bi.n === a.n + 3) g = 0.1;
+      else continue;
+      if (best[j] + g > best[i]) { best[i] = best[j] + g; prev[i] = j; }
     }
+    if (!bi.aligned && prev[i] < 0) best[i] = 0.25;
   }
   let end = 0; for (let i = 1; i < N; i++) if (best[i] > best[end]) end = i;
   const chain = []; for (let i = end; i >= 0; i = prev[i]) { chain.unshift(seq[i]); if (prev[i] < 0) break; }
@@ -149,83 +190,88 @@ export function detectQuestions(pages, opts = {}) {
     cur.questions.push(c);
   });
 
-  // 5) Geometri: sütun sınırları. Her sayfanın kaydırması (dx) çıkarılarak ortak koordinatta hesaplanır.
-  const dxOf = new Map();
-  for (const pi of new Set(chain.map(c => c.page))) {
-    const ds = chain.filter(c => c.page === pi).map(c => c.x - cols[c.col].x);
-    dxOf.set(pi, median(ds));
-  }
-  const dx = pi => dxOf.get(pi) || 0;
-  const leftX = cols[0].x;
-  const bandTop = pi => Math.min(...chain.filter(a => a.page === pi).map(a => a.y)) - 2;
-  let rightMax = 0;
-  for (const pi of dxOf.keys()) {
-    const top = bandTop(pi), d = dx(pi);
-    for (const it of pages[pi].items) {
-      if (it.rot || it.x - d < leftX - 2 || it.y < top || it.y > pages[pi].h * 0.9) continue;
-      rightMax = Math.max(rightMax, Math.min(it.r, pages[pi].w - 4) - d);
-    }
-  }
-  const colRight = cols.map((c, ci) => {
-    const next = cols[ci + 1];
-    if (!next) return rightMax + 2;
-    let m = 0;
-    // Yalnızca gerçekten iki sütunlu sayfalara bak (tam genişlikteki sayfaların satırları sütun arasını geçer)
-    const twoPages = new Set(chain.filter(a => a.col > ci).map(a => a.page));
-    for (const pi of twoPages) {
-      const top = bandTop(pi), d = dx(pi);
-      for (const it of pages[pi].items) {
-        if (it.rot || it.x - d < c.x - 1 || it.r - d > next.x - 4) continue;
-        if (it.y < top || it.y > pages[pi].h * 0.9) continue;
-        m = Math.max(m, it.r - d);
-      }
-    }
-    return m ? Math.min(m + 2, next.x - 5) : next.x - 8;
-  });
-
-  // Tekrarlanan (her sayfada aynı yerde) döndürülmüş yazılar → filigran/kod; temizlenecek
+  // 5) Sayfa geometrisi. Sütunlar her sayfada ayrı hesaplanır: aynı kitapta sütun genişliği sayfadan sayfaya değişebilir,
+  //    bir sayfada üstte sayfa genişliğinde bir soru, altında iki sütun olabilir.
   const repKey = it => it.str;
   const repCount = new Map();
   pages.forEach(p => { const seen = new Set(); p.items.forEach(it => { if (it.rot) { const k = repKey(it); if (!seen.has(k)) { seen.add(k); repCount.set(k, (repCount.get(k) || 0) + 1); } } }); });
   const repMin = Math.max(2, Math.ceil(textPages * 0.25));
-
-  // Alt bilgi bandı: soru sayfalarında alt %10'daki yazıların en üstü (tüm belge için ortak)
+  // Alt bilgi: sayfanın alt kısmında her sayfada tekrar eden yazılar (yayınevi adı, "Diğer sayfaya geçiniz") ve sayfa numarası.
+  // Sorunun kendisi sayfanın en altına kadar inebilir; o yüzden yalnızca bunlar alt sınır sayılır.
+  const footRep = new Map();
+  pages.forEach((p, pi) => p.items.forEach(i => { if (!i.rot && i.y > p.h * 0.85 && i.str.length >= 3 && !/^[A-E]\s*[).]/.test(i.str)) { const k = i.str; if (!footRep.has(k)) footRep.set(k, []); footRep.get(k).push([pi, i.y, i.x]); } }));
+  const aloneOnLine = (p, i) => !p.items.some(o => o !== i && !o.rot && Math.abs(o.base - i.base) < 2 && Math.abs((o.x + o.r) / 2 - (i.x + i.r) / 2) < p.w * 0.3);
+  const isFooter = (p, i) => !i.rot && i.y > p.h * 0.85 && ((/^\d{1,4}$/.test(i.str) && aloneOnLine(p, i)) || /^Diğer sayfaya|^DİĞER SAYFAYA/i.test(i.str) || (new Set((footRep.get(i.str) || []).filter(([, y, x]) => Math.abs(y - i.y) < 8 && Math.abs(x - i.x) < 12).map(([pg]) => pg)).size >= 3));
+  const footerOf = p => Math.min(p.h - 8, ...p.items.filter(i => isFooter(p, i)).map(i => i.y));
   const footYs = [];
-  for (const pi of new Set(chain.map(c => c.page))) { const p = pages[pi]; const ys = p.items.filter(i => i.y > p.h * 0.9).map(i => i.y / p.h); if (ys.length) footYs.push(Math.min(...ys)); }
-  const globalFooter = footYs.length >= 3 ? median(footYs) * pages[from - 1].h : Infinity;
-  const colIdx = x => { let k = 0; for (let i = 1; i < cols.length; i++) if (x >= cols[i].x - 6) k = i; return k; };
+  for (const pi of new Set(chain.map(c => c.page))) { const p = pages[pi]; const f = footerOf(p); if (f < p.h - 8) footYs.push(f / p.h); }
+  // Alt dörttebirlik: tek/çift sayfalarda alt bilgi farklıysa ("Diğer sayfaya geçiniz" yalnız tek sayfalarda) yüksekte olanı esas al
+  const globalFooter = footYs.length >= 3 ? [...footYs].sort((a, b) => a - b)[Math.floor(footYs.length * 0.25)] * pages[from - 1].h : Infinity;
+
   const pageInfo = new Map();
   const infoFor = pi => {
     if (pageInfo.has(pi)) return pageInfo.get(pi);
     const p = pages[pi];
     const anchors = chain.filter(c => c.page === pi);
-    const footerTop = Math.min(p.h - 8, globalFooter, ...p.items.filter(i => i.y > p.h * 0.9).map(i => i.y));
-    const stoppers = p.items.filter(i => !i.rot && STOPPER_UP.test(i.str) || (!i.rot && /^Diğer sayfaya/i.test(i.str)));
+    const leftA = anchors.filter(a => a.col === 0).sort((a, b) => a.y - b.y), rightA = anchors.filter(a => a.col === 1).sort((a, b) => a.y - b.y);
+    const ownFoot = footerOf(p);
+    // Ortak alt bilgi sınırı ancak o sayfada içerik daha aşağı inmiyorsa kullanılır
+    const lowest = Math.max(0, ...p.items.filter(i => !i.rot && !isFooter(p, i) && i.y < ownFoot).map(i => i.b));
+    const footerTop = Math.min(ownFoot, lowest < globalFooter ? globalFooter : ownFoot);
+    const bandTop = (anchors.length ? Math.min(...anchors.map(a => a.y)) : 0) - 2;
+    const L = leftA.length ? Math.min(...leftA.map(a => a.x)) : (rightA.length ? Math.min(...p.items.filter(i => !i.rot && i.y > bandTop && i.y < footerTop).map(i => i.x)) : 0);
+    const R = rightA.length ? Math.min(...rightA.map(a => a.x)) : null;
+    const imgs = (p.imgs || []).filter(im => im.b > bandTop && im.y < footerTop);
+    const body = p.items.filter(it => !it.rot && it.y >= bandTop && it.y < footerTop && it.x >= L - 14).concat(imgs.map(im => ({ ...im, img: true, str: '' })));
+    const pageRight = Math.max(L + 50, ...body.map(it => Math.min(it.r, p.w - 4)));
+    // Sol sütundaki bir soru sayfa genişliğinde mi? Sağ sütunda o yükseklikte numara yoksa ve
+    // satırlar sütun arasını geçiyorsa (ya da sağ sütun henüz başlamamışken sağ yarıda yazı varsa) evet.
+    const fullAt = (y, endY) => {
+      if (R === null) return true;
+      if (rightA.some(r => r.y > y - 5 && r.y < endY - 2)) return false;
+      const inR = body.filter(it => it.y >= y - 1 && it.b <= endY + 2);
+      const crossing = inR.some(it => it.x < R - 8 && it.r > R + 2);
+      const rightHalf = inR.some(it => it.x >= R - 3);
+      return crossing || (rightHalf && !rightA.some(r => r.y < y));
+    };
+    leftA.forEach((a, k) => {
+      const nx = leftA[k + 1];
+      a.full = fullAt(a.y, nx ? nx.y : footerTop);
+    });
+    rightA.forEach(a => { a.full = false; });
+    const fullRanges = leftA.filter(a => a.full).map((a, k, arr) => {
+      const nxt = anchors.filter(o => o.y > a.y + 2).map(o => o.y);
+      return [a.y - 3, Math.min(footerTop, ...nxt)];
+    });
+    const inFull = it => fullRanges.some(([y0, y1]) => it.y >= y0 && it.b <= y1 + 2);
+    let lr = 0;
+    if (R !== null) for (const it of body) if (it.r <= R - 4 && !inFull(it)) lr = Math.max(lr, it.r);
+    const leftRight = R === null ? pageRight : (lr ? Math.min(lr + 2, R - 5) : R - 8);
+    const stoppers = p.items.filter(i => !i.rot && (STOPPER_UP.test(i.str) || /^Diğer sayfaya/i.test(i.str)));
     const noise = p.items.filter(i => i.rot && (repCount.get(repKey(i)) || 0) >= repMin);
-    const twoCol = cols.length > 1 && anchors.some(a => a.col > 0);
-    // İki sütunlu sayfada sütun arasındaki kısa yazılar (kitapçık harfi, kod) da gürültüdür
-    const d = dx(pi);
-    if (twoCol) p.items.forEach(i => { const cx = (i.x + i.r) / 2 - d; if (cx > colRight[0] - 2 && cx < cols[1].x && (i.rot || i.str.length <= 10)) noise.push(i); });
+    // İki sütunlu bölgede sütun arasındaki kısa yazılar (kitapçık harfi, yayınevi kodu) gürültüdür
+    if (R !== null) p.items.forEach(i => { const cx = (i.x + i.r) / 2; if (cx > leftRight - 2 && cx < R && (i.rot || i.str.length <= 10) && !inFull(i)) noise.push(i); });
     // Ortak kök girişleri ("6. ve 7. soruları … cevaplayınız.")
+    const ci = x => (R !== null && x >= R - 6 ? 1 : 0);
     const lines = [];
-    const ci = x => twoCol ? colIdx(x - d) : 0;
-    for (const it of p.items) { if (it.rot) continue; const c = ci(it.x); let L = lines.find(l => Math.abs(l.base - it.base) < 2 && l.col === c); if (!L) { L = { base: it.base, col: c, items: [] }; lines.push(L); } L.items.push(it); }
+    for (const it of p.items) { if (it.rot) continue; const c = ci(it.x); let Ln = lines.find(l => Math.abs(l.base - it.base) < 2 && l.col === c); if (!Ln) { Ln = { base: it.base, col: c, items: [] }; lines.push(Ln); } Ln.items.push(it); }
     lines.forEach(l => { l.items.sort((a, b) => a.x - b.x); l.text = l.items.map(i => i.str).join(' '); l.x = l.items[0].x; l.y = Math.min(...l.items.map(i => i.y)); l.b = Math.max(...l.items.map(i => i.b)); });
     lines.sort((a, b) => a.col - b.col || a.y - b.y);
     const intros = [];
     lines.forEach((l, li) => {
-      if (!INTRO_ANY.test(l.text) || anchors.some(a => Math.abs(a.it.base - l.base) < 2 && a.x <= l.x + 1)) return;
-      // Cümlenin devam ettiği satırlar (en çok 3) — görüntüden silinecek
+      if (!(INTRO_ANY.test(l.text) || INTRO_EN.test(l.text)) || anchors.some(a => Math.abs(a.it.base - l.base) < 2 && a.x <= l.x + 1)) return;
       const parts = [l];
       for (let k = li + 1; k < lines.length && parts.length < 4 && !INTRO_END.test(parts[parts.length - 1].text); k++) {
         if (lines[k].col !== l.col || lines[k].y - parts[parts.length - 1].b > 8) break;
         parts.push(lines[k]);
       }
       if (!INTRO_END.test(parts[parts.length - 1].text) && !INTRO_LEAD.test(l.text.replace(/^[^\d]*/, ''))) return;
-      const m = l.text.match(/(\d{1,3})\s*\.?\s*(?:ve|ile|,|-|–|—)\s*(\d{1,3})/);
-      intros.push({ y: l.y, x: l.x, col: twoCol ? l.col : 0, from: m ? +m[1] : 0, to: m ? +m[2] : 0, erase: parts.flatMap(pp => pp.items) });
+      const m = l.text.match(/(\d{1,3})\s*\.?\s*(?:ve|ile|,|-|–|—|and|&)\s*(\d{1,3})/);
+      const nextL = leftA.find(a => a.y > l.y + 2);
+      const full = l.col === 0 && fullAt(l.y, nextL ? nextL.y : footerTop);
+      intros.push({ y: l.y, x: l.x, col: l.col, full, from: m ? +m[1] : 0, to: m ? +m[2] : 0, erase: parts.flatMap(pp => pp.items) });
     });
-    const inf = { anchors, footerTop, stoppers, noise, twoCol, d, intros };
+    const inf = { anchors, footerTop, stoppers, noise, twoCol: R !== null, L, R, leftRight, pageRight, intros };
     pageInfo.set(pi, inf);
     return inf;
   };
@@ -233,18 +279,31 @@ export function detectQuestions(pages, opts = {}) {
   // Bir dikdörtgenin içinde başlayan yazılar kesilmesin: sağ sınırı yazının bittiği yere kadar aç
   const regionText = (p, x0, x1, y0, y1, skip) => p.items.filter(it => !it.rot && it !== skip && it.x >= x0 - 1 && it.x < x1 && it.y >= y0 - 1 && it.b <= y1 + 2);
   const growRight = (p, inf, col, full, x0, x1, y0, y1) => {
-    const cap = (!full && col < cols.length - 1) ? cols[col + 1].x + inf.d - 6 : p.w - 2;
+    const cap = (!full && col === 0 && inf.R !== null) ? inf.R - 6 : p.w - 2;
     let r = Math.min(x1, cap);
     for (const it of regionText(p, x0, r, y0, y1)) if (!inf.noise.includes(it)) r = Math.max(r, Math.min(it.r + 1.5, cap));
+    // Bölgede başlayan resimler de kesilmesin (ör. sağdaki son şıkkın resmi)
+    for (const im of regionImgs(p, x0, r, y0, y1)) r = Math.max(r, Math.min(im.r + 1.5, cap));
     return r;
   };
+  // Resim bölgeye ait sayılır: bölgede başlıyor ve yüksekliğinin çoğu bölgenin içinde (alt bilgi süsü gibi sınırdan sarkanlar sayılmaz)
+  const vIn = (im, y0, y1) => (Math.min(im.b, y1) - Math.max(im.y, y0)) / Math.max(1, im.b - im.y);
+  const regionImgs = (p, x0, x1, y0, y1) => (p.imgs || []).filter(im => im.x >= x0 - 2 && im.x < x1 && im.y >= y0 - 2 && im.y < y1 && vIn(im, y0, y1) >= 0.6);
+  const overlapImgs = (p, x0, x1, y0, y1) => (p.imgs || []).filter(im => im.r > x0 && im.x < x1 && im.b > y0 && im.y < y1 && vIn(im, y0, y1) >= 0.5);
   const textBox = (p, inf, x0, x1, y0, y1, skip, erase = []) => {
     let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+    for (const im of regionImgs(p, x0, x1, y0, y1)) { bx0 = Math.min(bx0, im.x); by0 = Math.min(by0, im.y); bx1 = Math.max(bx1, Math.min(im.r, x1)); by1 = Math.max(by1, Math.min(im.b, y1)); }
     for (const it of regionText(p, x0, x1, y0, y1, skip)) {
       if (inf.noise.includes(it) || erase.includes(it)) continue;
       bx0 = Math.min(bx0, it.x); by0 = Math.min(by0, it.y); bx1 = Math.max(bx1, it.r); by1 = Math.max(by1, it.b);
     }
     return bx0 < Infinity ? { x: bx0, y: by0, r: bx1, b: by1 } : null;
+  };
+  // Bir bölgenin alt sınırı: aynı sütundaki sonraki numara/giriş; sayfa genişliğindeki numaralar her sütunu keser
+  const bottomOf = (inf, y, col, full, self) => {
+    const below = inf.anchors.filter(a => a !== self && a.y > y + 2 && (full || a.full || a.col === col)).map(a => a.y);
+    const intro = inf.intros.filter(o => o.y > y + 2 && (full || o.full || o.col === col)).map(o => o.y);
+    return Math.min(inf.footerTop, ...below, ...intro);
   };
 
   const questions = [], stems = [];
@@ -252,15 +311,12 @@ export function detectQuestions(pages, opts = {}) {
     t.index = ti;
     t.questions = t.questions.map(c => {
       const p = pages[c.page], inf = infoFor(c.page);
-      const full = !inf.twoCol;
+      const full = !!c.full || !inf.twoCol;
       let x0 = c.numR + 1.5;
-      let x1 = (full ? rightMax + 2 : colRight[c.col]) + inf.d;
+      let x1 = (full || c.col === 1 ? inf.pageRight + 2 : inf.leftRight);
       const y0 = c.y - 3;
-      // Sonraki numara ya da ortak kök girişi: aynı sütunda altta (tam genişlikte: herhangi sütunda altta)
-      const below = inf.anchors.filter(a => a !== c && a.y > c.y + 2 && (full || a.col === c.col)).map(a => a.y);
-      const intro = inf.intros.filter(o => o.y > c.y + 2 && (full || o.col === c.col)).map(o => o.y);
       const stop = inf.stoppers.filter(s => s.y > c.b && s.r > x0 && s.x < x1).map(s => s.y);
-      const y1 = Math.min(inf.footerTop, ...below, ...intro, ...stop) - 3;
+      const y1 = Math.min(bottomOf(inf, c.y, c.col, full, c), ...stop) - 3;
       // Soru metni numaranın bittiği yerden önce başlıyorsa (asılı girinti yoksa) sol sınırı metne göre al
       let minX = Infinity;
       for (const it of p.items) {
@@ -269,7 +325,7 @@ export function detectQuestions(pages, opts = {}) {
       }
       if (minX < x0) x0 = Math.max(c.x + 2, minX - 1);
       x1 = growRight(p, inf, c.col, full, x0, x1, y0, y1);
-      const q = { test: ti, n: c.n, page: c.page, col: c.col, rect: { x: x0, y: y0, w: Math.max(10, x1 - x0), h: Math.max(10, y1 - y0) }, full, contentW: rightMax - leftX, noise: inf.noise, text: (tb => tb && { ...tb, y: Math.min(tb.y, c.y) })(textBox(p, inf, x0, x1, y0, y1, c.it)), stem: -1 };
+      const q = { test: ti, n: c.n, page: c.page, col: full ? 0 : c.col, rect: { x: x0, y: y0, w: Math.max(10, x1 - x0), h: Math.max(10, y1 - y0) }, full, contentW: inf.pageRight - inf.L, noise: inf.noise, text: (tb => tb && { ...tb, y: Math.min(tb.y, c.y) })(textBox(p, inf, x0, x1, y0, y1, c.it)), stem: -1, imgs: overlapImgs(p, x0, x1, y0, y1) };
       questions.push(q);
       return q;
     });
@@ -279,24 +335,20 @@ export function detectQuestions(pages, opts = {}) {
   for (const pi of new Set(chain.map(c => c.page))) {
     const p = pages[pi], inf = infoFor(pi);
     for (const o of inf.intros) {
-      const full = !inf.twoCol;
-      let x0 = (full || o.col === 0 ? cols[0].x : cols[o.col].x) + inf.d;
-      let x1 = (full ? rightMax + 2 : colRight[o.col]) + inf.d;
-      // Giriş metni numara hizasının solundan başlayabilir
-      x0 = Math.min(x0, o.x) - 1.5;
-      const prevR = (!full && o.col > 0) ? colRight[o.col - 1] + inf.d + 1 : 0;
-      x0 = Math.max(x0, prevR);
+      const full = o.full || !inf.twoCol;
+      const colX = o.col === 1 ? inf.R : inf.L;
+      const prevR = (!full && o.col === 1) ? inf.leftRight + 1 : 0;
+      let x0 = Math.max(Math.min(colX, o.x) - 1.5, prevR);
+      let x1 = (full || o.col === 1) ? inf.pageRight + 2 : inf.leftRight;
       const y0 = o.y - 3;
-      const below = inf.anchors.filter(a => a.y > o.y + 2 && (full || a.col === o.col)).map(a => a.y);
-      const y1 = Math.min(inf.footerTop, ...below) - 3;
+      const y1 = bottomOf(inf, o.y, o.col, full, null) - 3;
       if (y1 - y0 < 6) continue;
       for (const it of regionText(p, x0 - 12, x1, y0, y1)) if (!inf.noise.includes(it) && it.x < x0 + 1 && it.x > prevR) x0 = it.x - 1.5;
       x1 = growRight(p, inf, o.col, full, x0, x1, y0, y1);
       const si = stems.length;
-      stems.push({ page: pi, rect: { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }, erase: o.erase, noise: inf.noise, text: textBox(p, inf, x0, x1, y0, y1, null, o.erase) });
+      stems.push({ page: pi, rect: { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }, erase: o.erase, noise: inf.noise, text: textBox(p, inf, x0, x1, y0, y1, null, o.erase), imgs: overlapImgs(p, x0, x1, y0, y1) });
       // Hangi sorular? Numaralar verildiyse onlar; verilmediyse girişten sonraki ilk iki soru
-      const qc = q => (infoFor(q.page).twoCol ? q.col : 0);
-      const after = questions.filter(q => q.page > pi || (q.page === pi && (qc(q) > o.col || (qc(q) === o.col && q.rect.y > o.y))));
+      const after = questions.filter(q => q.page > pi || (q.page === pi && (q.col > o.col || (q.col === o.col && q.rect.y > o.y) || (o.full && q.rect.y > o.y))));
       let grp = [];
       if (o.from && o.to >= o.from && o.to - o.from < 12) {
         const firstAfter = after[0];
@@ -368,7 +420,7 @@ export function detectQuestions(pages, opts = {}) {
   if (key) qTests.forEach((t, i) => { t.anahtar = key.cols[i] || ''; t.anahtarKaynak = 'anahtar'; });
   fillFromSolutions(tests);
 
-  return { colRight, tests, questions, stems, warnings, anahtarSayfa: key ? key.page + 1 : 0, body, cols: cols.map(c => c.x) };
+  return { tests, questions, stems, warnings, anahtarSayfa: key ? key.page + 1 : 0, body };
 }
 
 /** Her çözüm bölümünü, aynı sayıda sorusu olan (tercihen önceki) soru testine bağla */
@@ -476,46 +528,60 @@ export async function renderPage(page, scale) {
  * (ör. pembe MEB logosu). Bulunamazsa null.
  */
 export function detectWatermark(canvases) {
-  // Filigran: açık, doygun olmayan tek bir ton; sayfaların çoğunda geniş alan kaplar.
-  const pagesHas = new Map(), totals = new Map();
+  // Filigran: açık renkli tonlar (pembe amblem, açık gri yazı, açık yeşil yaprak…); soruların çoğunda geniş alan kaplar.
+  // En çok üç ton döner. Gri tonlar için daha yüksek kapsama aranır (yazı kenarlarındaki gri pikseller filigran sanılmasın).
+  // 16'lık kutular: filigranın yumuşak geçişli kenarları tek kutuda toplansın; kutunun rengi = içindeki piksellerin ortalaması
+  const pagesHas = new Map(), totals = new Map(), sums = new Map();
   for (const c of canvases) {
     const d = c.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, c.width, c.height).data;
     const hist = new Map(); let n = 0;
     for (let i = 0; i < d.length; i += 4 * 7) {
       const r = d[i], g = d[i + 1], b = d[i + 2];
       n++;
-      const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
-      if (mn < 150 || mx - mn < 18) continue;
-      const k = (r >> 3) << 10 | (g >> 3) << 5 | (b >> 3);
+      const mn = Math.min(r, g, b);
+      if (mn < 190 || mn > 246) continue;
+      const k = (r >> 4) << 8 | (g >> 4) << 4 | (b >> 4);
       hist.set(k, (hist.get(k) || 0) + 1);
+      let sm = sums.get(k); if (!sm) { sm = [0, 0, 0, 0]; sums.set(k, sm); } sm[0] += r; sm[1] += g; sm[2] += b; sm[3]++;
     }
     hist.forEach((v, k) => {
+      const sm = sums.get(k), r = sm[0] / sm[3], g = sm[1] / sm[3], b = sm[2] / sm[3];
+      const gray = Math.max(r, g, b) - Math.min(r, g, b) < 14;
       totals.set(k, (totals.get(k) || 0) + v / n);
-      if (v / n >= 0.004) pagesHas.set(k, (pagesHas.get(k) || 0) + 1);
+      if (v / n >= (gray ? 0.012 : 0.003)) pagesHas.set(k, (pagesHas.get(k) || 0) + (gray ? 1 : 1.6));
     });
   }
-  let bk = -1, bs = 0;
   const need = Math.max(1, Math.ceil(canvases.length * 0.4));
-  pagesHas.forEach((pc, k) => { if (pc < need) return; const s = pc + totals.get(k); if (s > bs) { bs = s; bk = k; } });
-  if (bk < 0) return null;
-  return [((bk >> 10) & 31) * 8 + 4, ((bk >> 5) & 31) * 8 + 4, (bk & 31) * 8 + 4];
+  const cand = [...pagesHas].filter(([, pc]) => pc >= need).map(([k, pc]) => ({ k, s: pc + totals.get(k) })).sort((a, b) => b.s - a.s);
+  const out = [];
+  for (const { k } of cand) {
+    const sm = sums.get(k), col = [Math.round(sm[0] / sm[3]), Math.round(sm[1] / sm[3]), Math.round(sm[2] / sm[3])];
+    // Aynı tonun komşu kutuları tek renk sayılır
+    if (out.some(o => Math.abs(o[0] - col[0]) + Math.abs(o[1] - col[1]) + Math.abs(o[2] - col[2]) < 24)) continue;
+    out.push(col);
+    if (out.length >= 3) break;
+  }
+  return out.length ? out : null;
 }
 
 /** Beyaz ile filigran rengi arasındaki tonları beyaza çevir */
 export function removeWatermark(canvas, wm) {
   if (!wm) return canvas;
+  const cols = Array.isArray(wm[0]) ? wm : [wm];
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   const im = ctx.getImageData(0, 0, canvas.width, canvas.height);
   const d = im.data;
-  const dv = [255 - wm[0], 255 - wm[1], 255 - wm[2]];
-  const len2 = dv[0] * dv[0] + dv[1] * dv[1] + dv[2] * dv[2];
+  // Filigranın koyu yerleri (harf ortaları) bulunan ortalama tondan biraz daha koyu olabilir: gri tonda %50, renklide %30 pay
+  const vs = cols.map(c => { const dv = [255 - c[0], 255 - c[1], 255 - c[2]]; const gray = Math.max(...c) - Math.min(...c) < 14; return { dv, tmax: gray ? 1.5 : 1.3, len2: dv[0] * dv[0] + dv[1] * dv[1] + dv[2] * dv[2] || 1 }; });
   for (let i = 0; i < d.length; i += 4) {
     const p0 = 255 - d[i], p1 = 255 - d[i + 1], p2 = 255 - d[i + 2];
     if (p0 + p1 + p2 < 6) continue;
-    const t = (p0 * dv[0] + p1 * dv[1] + p2 * dv[2]) / len2;          // beyazdan filigrana doğru izdüşüm
-    if (t < 0 || t > 1.25) continue;
-    const e0 = p0 - t * dv[0], e1 = p1 - t * dv[1], e2 = p2 - t * dv[2];
-    if (e0 * e0 + e1 * e1 + e2 * e2 < 22 * 22) { d[i] = d[i + 1] = d[i + 2] = 255; }
+    for (const { dv, len2, tmax } of vs) {
+      const t = (p0 * dv[0] + p1 * dv[1] + p2 * dv[2]) / len2;          // beyazdan filigrana doğru izdüşüm
+      if (t < 0 || t > tmax) continue;
+      const e0 = p0 - t * dv[0], e1 = p1 - t * dv[1], e2 = p2 - t * dv[2];
+      if (e0 * e0 + e1 * e1 + e2 * e2 < 22 * 22) { d[i] = d[i + 1] = d[i + 2] = 255; break; }
+    }
   }
   ctx.putImageData(im, 0, 0);
   return canvas;
@@ -583,10 +649,21 @@ export function cropQuestion(pageCanvas, q, scale, opts = {}) {
   ctx.fillStyle = '#fff';
   for (const n of q.noise || []) ctx.fillRect(n.x * scale - x - 2, n.y * scale - y - 2, (n.r - n.x) * scale + 4, (n.b - n.y) * scale + 4);
   for (const n of q.erase || []) ctx.fillRect(n.x * scale - x - 2, n.y * scale - y - 2, (n.r - n.x) * scale + 4, (n.b - n.y) * scale + 4);
-  if (opts.watermark) removeWatermark(c, opts.watermark);
-  if (q.text) dropStrays(c, { x: q.text.x * scale - x, y: q.text.y * scale - y, r: q.text.r * scale - x, b: q.text.b * scale - y }, scale);
+  if (opts.watermark) {
+    // Fotoğrafların açık renkli yerleri filigran sanılıp silinmesin: resim alanları korunur
+    // (Yalnızca kesimin tamamen içinde kalan resimler: kırpma yoluyla gösterilen büyük resimlerin gerçek sınırı bilinemez)
+    const inside = im => im.x >= r.x - 2 && im.r <= r.x + r.w + 2 && im.y >= r.y - 2 && im.b <= r.y + r.h + 2;
+    const keep = (q.imgs || []).filter(inside).map(im => {
+      const ix = Math.max(0, Math.floor(im.x * scale - x)), iy = Math.max(0, Math.floor(im.y * scale - y));
+      const iw = Math.min(w, Math.ceil(im.r * scale - x)) - ix, ih = Math.min(h, Math.ceil(im.b * scale - y)) - iy;
+      return iw > 2 && ih > 2 ? { ix, iy, data: ctx.getImageData(ix, iy, iw, ih) } : null;
+    }).filter(Boolean);
+    removeWatermark(c, opts.watermark);
+    keep.forEach(k => ctx.putImageData(k.data, k.ix, k.iy));
+  }
+  if (q.text && !opts.raw) dropStrays(c, { x: q.text.x * scale - x, y: q.text.y * scale - y, r: q.text.r * scale - x, b: q.text.b * scale - y }, scale);
   let out = opts.trim ? opts.trim(c, 2) : c;
-  out = sweepEdges(out, scale);
+  if (!opts.raw) out = sweepEdges(out, scale);
   return opts.trim ? opts.trim(out, Math.round(3 * scale)) : out;
 }
 

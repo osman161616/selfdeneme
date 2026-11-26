@@ -1,7 +1,7 @@
 import { state, saveQuestions, deleteQuestions, dersList, konuList } from '../db.js';
 import { esc, $, $$, pickFiles, makeCanvas, trimCanvas, canvasToBlob, LETTERS } from '../util.js';
 import { toast, progress, guard, alertDlg, confirmDlg, modal } from '../ui.js';
-import { normalizeItems, detectQuestions, matchDers, parseKeyText, renderPage, detectWatermark, cropQuestion, removeWatermark, stackStem } from '../autocrop.js';
+import { normalizeItems, pageImages, detectQuestions, matchDers, parseKeyText, renderPage, detectWatermark, cropQuestion, removeWatermark, stackStem } from '../autocrop.js';
 import { LISE_DERSLER, ORTAOKUL_DERSLER } from '../sinavlar.js';
 import { loadPdfJs, imageFileToCanvas } from '../omr.js';
 import { newQuestion } from '../importers.js';
@@ -263,7 +263,8 @@ async function runAuto(host, src) {
       const w = x1 - x0, h = y1 - y0;
       const tc = await page.getTextContent();
       const items = normalizeItems(tc.items.map(it => ({ ...it, transform: [it.transform[0], it.transform[1], it.transform[2], it.transform[3], it.transform[4] - x0, it.transform[5] - y0] })), w, h);
-      pages.push({ w, h, items });
+      const imgs = await pageImages(page, (await loadPdfJs()).OPS);
+      pages.push({ w, h, items, imgs });
       pg.set(i / doc.numPages * 0.25, `Sayfa ${i}/${doc.numPages} okunuyor`);
     }
     const res = detectQuestions(pages);
@@ -281,11 +282,14 @@ async function runAuto(host, src) {
     let wm = null;
     if (S.filigran) {
       // Filigran rengini birkaç sorunun ham görüntüsünden bul
-      const pick = [...byPage.keys()].filter((_, i, a) => i % Math.max(1, Math.floor(a.length / 6)) === 0).slice(0, 6);
+      const pick = [...byPage.keys()].filter((_, i, a) => i % Math.max(1, Math.floor(a.length / 8)) === 0).slice(0, 8);
       const raws = [];
       for (const pi of pick) {
         const c = await renderPage(await doc.getPage(pi + 1), scale);
-        byPage.get(pi).forEach(q => raws.push(cropQuestion(c, q, scale, {})));
+        // Sayfanın soru alanının tamamı (başlık ve alt bilgi hariç): filigran sayfa başına bir kez, farklı yerde durabilir
+        const qs = byPage.get(pi), x0 = Math.min(...qs.map(q => q.rect.x)), y0 = Math.min(...qs.map(q => q.rect.y));
+        const x1 = Math.max(...qs.map(q => q.rect.x + q.rect.w)), y1 = Math.max(...qs.map(q => q.rect.y + q.rect.h));
+        raws.push(cropQuestion(c, { rect: { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } }, scale, { raw: true }));
       }
       wm = detectWatermark(raws);
     }
