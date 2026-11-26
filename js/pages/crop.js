@@ -3,6 +3,7 @@ import { esc, $, $$, pickFiles, makeCanvas, trimCanvas, canvasToBlob, LETTERS } 
 import { toast, progress, guard, alertDlg, confirmDlg, modal } from '../ui.js';
 import { normalizeItems, pageImages, detectQuestions, matchDers, parseKeyText, renderPage, detectWatermark, cropQuestion, removeWatermark, stackStem } from '../autocrop.js';
 import { LISE_DERSLER, ORTAOKUL_DERSLER } from '../sinavlar.js';
+import { attachKeyOcr } from '../keyocrui.js';
 import { loadPdfJs, imageFileToCanvas } from '../omr.js';
 import { newQuestion } from '../importers.js';
 
@@ -367,7 +368,7 @@ function renderAuto(host) {
         <button class="btn primary" id="a-save" ${inc ? '' : 'disabled'}>Seçilenleri bankaya kaydet (${inc})</button>
       </div>
     </div>
-    <p class="small muted" style="margin:10px 0 0">Kontrol edin: her test için <b>ders</b> ve <b>konu</b> yazın (konu soru bazında da değiştirilebilir). Yanlış kesilmiş bir soru varsa <b>Elle düzelt</b>'e basın; sayfa açılır ve kutuyu siz ayarlarsınız. ${noAns ? `<b style="color:var(--bad)">${noAns} sorunun cevabı boş.</b>` : ''}</p>
+    <p class="small muted" style="margin:10px 0 0">Kontrol edin: her test için <b>ders</b> ve <b>konu</b> yazın (konu soru bazında da değiştirilebilir). Yanlış kesilmiş bir soru varsa <b>Elle düzelt</b>'e basın; sayfa açılır ve kutuyu siz ayarlarsınız. <b id="a-noans" style="color:var(--bad)">${noAns ? `${noAns} sorunun cevabı boş.` : ''}</b></p>
   </div>
   ${A.tests.map((t, ti) => {
     const its = A.items.filter(i => i.test === ti);
@@ -406,7 +407,7 @@ function acard(it, idx, letters) {
   return `<div class="acard ${it.include ? '' : 'off'} ${it.saved ? 'saved' : ''}" data-i="${idx}">
     <div class="im" data-zoom="${idx}" title="Büyütmek için tıklayın"><img src="${it.url}" alt="${it.n}. soru"></div>
     <div class="ah"><b>${it.n}.</b>${it.saved ? '<span class="pill ok">Kaydedildi</span>' : `<label class="check small"><input type="checkbox" data-inc ${it.include ? 'checked' : ''}> Ekle</label>`}</div>
-    <div class="amini">${letters.map(L => `<button type="button" data-L="${L}" class="${it.cevap === L ? 'on' : ''}" ${it.saved ? 'disabled' : ''}>${L}</button>`).join('')}</div>
+    <div class="amini">${letters.map(L => `<button type="button" data-l="${L}" class="${it.cevap === L ? 'on' : ''}" ${it.saved ? 'disabled' : ''}>${L}</button>`).join('')}</div>
     <input class="akonu" data-konu value="${esc(it.konu)}" placeholder="Konu (boşsa testinki)" ${it.saved ? 'disabled' : ''}>
     <div class="row between small"><label class="check small"><input type="checkbox" data-yat ${it.yatay ? 'checked' : ''} ${it.saved ? 'disabled' : ''}> Yatay</label>${it.saved ? '' : '<button class="btn sm ghost" data-fix>Elle düzelt</button>'}</div>
   </div>`;
@@ -419,13 +420,22 @@ function bindAuto(host, body) {
     const inc = A.items.filter(i => i.include && !i.saved).length;
     const b = $('#a-save', body); b.disabled = !inc; b.textContent = `Seçilenleri bankaya kaydet (${inc})`;
   };
-  const syncKey = ti => { const inp = $(`[data-ta="${ti}"]`, body); if (inp) inp.value = A.items.filter(i => i.test === ti).map(i => i.cevap || '-').join(''); };
+  const syncKey = ti => {
+    const inp = $(`[data-ta="${ti}"]`, body); if (inp) inp.value = A.items.filter(i => i.test === ti).map(i => i.cevap || '-').join('');
+    const na = A.items.filter(i => i.include && !i.saved && !i.cevap).length, el = $('#a-noans', body);
+    if (el) el.textContent = na ? `${na} sorunun cevabı boş.` : '';
+  };
   $('#a-wm', body).addEventListener('change', guard(async e => { S.filigran = e.target.checked; const saved = A.items.filter(i => i.saved).map(i => i.n + '/' + i.test); await runAuto(host, A.src); S.auto.items.forEach(i => { if (saved.includes(i.n + '/' + i.test)) { i.saved = true; i.include = false; } }); renderAuto(host); }));
   $('#a-manual', body).addEventListener('click', () => { S.autoView = false; renderWork(host); });
   $('#a-save', body).addEventListener('click', guard(() => saveAuto(host)));
   $$('[data-td]', body).forEach(inp => inp.addEventListener('change', () => { const t = A.tests[+inp.dataset.td]; t.ders = inp.value.trim(); $(`#a-kl-${inp.dataset.td}`, body).innerHTML = konuList(t.ders).map(d => `<option value="${esc(d)}">`).join(''); }));
   $$('[data-tk]', body).forEach(inp => inp.addEventListener('input', () => { A.tests[+inp.dataset.tk].konu = inp.value; }));
   $$('[data-tz]', body).forEach(seg => $$('button', seg).forEach(b => b.addEventListener('click', () => { A.tests[+seg.dataset.tz].zorluk = b.dataset.z; $$('button', seg).forEach(x => x.classList.toggle('on', x === b)); })));
+  $$('[data-ta]', body).forEach(inp => attachKeyOcr(inp, {
+    expected: () => A.items.filter(i => i.test === +inp.dataset.ta).length,
+    secenek: A.secenek,
+    apply: k => { inp.value = k; inp.dispatchEvent(new Event('change')); },
+  }));
   $$('[data-ta]', body).forEach(inp => inp.addEventListener('change', () => {
     const ti = +inp.dataset.ta;
     const raw = inp.value.toUpperCase();
@@ -434,7 +444,7 @@ function bindAuto(host, body) {
     const its = A.items.filter(i => i.test === ti);
     its.forEach((it, k) => { if (it.saved) return; const L = seq[k]; it.cevap = L && /[A-E]/.test(L) && LETTERS.slice(0, A.secenek).includes(L) ? L : ''; });
     if (seq.filter(x => /[A-E]/.test(x)).length !== its.length) toast(`Anahtarda ${seq.filter(x => /[A-E]/.test(x)).length} harf var, testte ${its.length} soru var. Eksik kalanlar boş bırakıldı.`, 'err');
-    $$(`.atest[data-t="${ti}"] .acard[data-i]`, body).forEach(card => { const it = itemOf(card); $$('[data-L]', card).forEach(b => b.classList.toggle('on', b.dataset.L === it.cevap)); });
+    $$(`.atest[data-t="${ti}"] .acard[data-i]`, body).forEach(card => { const it = itemOf(card); $$('[data-l]', card).forEach(b => b.classList.toggle('on', b.dataset.l === it.cevap)); });
     syncKey(ti);
   }));
   $$('[data-tur]', body).forEach(seg => $$('button', seg).forEach(b => b.addEventListener('click', () => {
@@ -454,7 +464,7 @@ function bindAuto(host, body) {
     const it = itemOf(card);
     const inc = $('[data-inc]', card);
     if (inc) inc.addEventListener('change', () => { it.include = inc.checked; card.classList.toggle('off', !it.include); refreshHead(); });
-    $$('[data-L]', card).forEach(b => b.addEventListener('click', () => { it.cevap = it.cevap === b.dataset.L ? '' : b.dataset.L; $$('[data-L]', card).forEach(x => x.classList.toggle('on', x.dataset.L === it.cevap)); syncKey(it.test); }));
+    $$('[data-l]', card).forEach(b => b.addEventListener('click', () => { it.cevap = it.cevap === b.dataset.l ? '' : b.dataset.l; $$('[data-l]', card).forEach(x => x.classList.toggle('on', x.dataset.l === it.cevap)); syncKey(it.test); }));
     const kk = $('[data-konu]', card); kk.addEventListener('input', () => { it.konu = kk.value; });
     kk.setAttribute('list', `a-kl-${it.test}`);
     $('[data-yat]', card).addEventListener('change', e => { it.yatay = e.target.checked; });

@@ -6,6 +6,7 @@ import { formSpecFromQuestions, readSheet, pdfPages, imageFileToCanvas, rowCropR
 import { puanlamaSnapshot, touch } from '../scoring.js';
 import { formDialog } from './homework.js';
 import { SABLONLAR, sablon, sablonlarFor, alanAd } from '../sinavlar.js';
+import { attachKeyOcr } from '../keyocrui.js';
 
 export const wz = { active: false };
 function reset() { Object.keys(wz).forEach(k => delete wz[k]); wz.active = false; }
@@ -108,6 +109,7 @@ async function manualKey() {
           <label class="fld" style="flex:2;min-width:200px"><span>Cevaplar <small data-cnt="${i}">${r.cevaplar.replace(/[^A-Ea-e]/g, '').length} soru</small></span><input data-r="${i}" data-f="cevaplar" value="${esc(r.cevaplar)}" style="font-family:ui-monospace,monospace;letter-spacing:.1em;text-transform:uppercase"></label>
           <button class="icon-btn" data-rm="${i}" aria-label="Sil">✕</button></div>
           <label class="fld" style="margin-top:8px"><span>Konular (isteğe bağlı)</span><textarea data-r="${i}" data-f="konular" style="min-height:44px" placeholder="Fiilimsiler, Fiilimsiler, Cümlenin Ögeleri, …">${esc(r.konular)}</textarea></label></div>`).join('') + `<datalist id="mk-dl">${dl.map(d => `<option value="${esc(d)}">`).join('')}</datalist>`;
+        $$('[data-f="cevaplar"]', m).forEach(inp => attachKeyOcr(inp, { apply: k => { inp.value = k.replace(/-/g, '?'); inp.dispatchEvent(new Event('input')); } }));
         $$('[data-r]', m).forEach(inp => inp.addEventListener('input', () => { rows[+inp.dataset.r][inp.dataset.f] = inp.value; if (inp.dataset.f === 'cevaplar') { const c = $(`[data-cnt="${inp.dataset.r}"]`, m); c.textContent = inp.value.replace(/[^A-Ea-e]/g, '').length + ' soru'; } }));
         $$('[data-rm]', m).forEach(b => b.addEventListener('click', () => { rows.splice(+b.dataset.rm, 1); draw(); }));
       };
@@ -119,6 +121,7 @@ async function manualKey() {
   if (!res) return false;
   const key = [];
   for (const r of rows) {
+    if (/\?/.test(r.cevaplar)) { await alertDlg(`${r.ders || 'Bir ders'}: görselden okunamayan cevaplar (?) var. Lütfen düzeltin.`); return false; }
     const ans = r.cevaplar.toUpperCase().replace(/[^A-E]/g, '');
     if (!r.ders.trim() || !ans.length) continue;
     const konular = r.konular.split(/[,\n;]/).map(s => s.trim()).filter(Boolean);
@@ -156,6 +159,7 @@ async function templateKey() {
             <label class="fld"><span>Cevaplar <small id="tk-bc">${cnt} soru</small></span><input id="tk-ba" value="${esc(draft.bAns)}" style="font-family:ui-monospace,monospace;letter-spacing:.1em;text-transform:uppercase" autocomplete="off"></label>
             <details><summary class="small">Konular (isteğe bağlı)</summary><textarea id="tk-bk" style="min-height:50px;margin-top:6px" placeholder="Her soru için bir konu: virgülle ya da satır satır">${esc(draft.bKon)}</textarea></details>`;
           $('#tk-bs', m).addEventListener('change', e => { draft.bSlot = e.target.value; });
+          attachKeyOcr($('#tk-ba', m), { secenek: t.secenek, apply: k => { const i = $('#tk-ba', m); i.value = k.replace(/-/g, '?'); i.dispatchEvent(new Event('input')); } });
           $('#tk-ba', m).addEventListener('input', e => { draft.bAns = e.target.value; $('#tk-bc', m).textContent = e.target.value.replace(/[^A-Ea-e]/g, '').length + ' soru'; });
           $('#tk-bk', m).addEventListener('input', e => { draft.bKon = e.target.value; });
           return;
@@ -169,6 +173,7 @@ async function templateKey() {
             <input data-a="${k}" data-n="${n}" value="${esc(v)}" style="font-family:ui-monospace,monospace;letter-spacing:.1em;text-transform:uppercase" autocomplete="off">
             <details style="margin-top:6px"><summary class="small">Konular (isteğe bağlı)</summary><textarea data-k="${k}" style="min-height:50px;margin-top:6px" placeholder="Her soru için bir konu: virgülle ya da satır satır">${esc(draft.kon[k] || '')}</textarea></details></div>`;
         }).join('');
+        $$('[data-a]', m).forEach(inp => attachKeyOcr(inp, { expected: () => +inp.dataset.n, secenek: t.secenek, apply: k => { inp.value = k.replace(/-/g, '?'); inp.dispatchEvent(new Event('input')); } }));
         $$('[data-a]', m).forEach(inp => inp.addEventListener('input', () => { draft.ans[inp.dataset.a] = inp.value; const c = inp.value.replace(/[^A-Ea-e]/g, '').length, n = +inp.dataset.n; const el = $(`[data-cnt="${inp.dataset.a}"]`, m); el.textContent = `${c}/${n}`; el.style.color = c === n ? 'var(--ok)' : c ? 'var(--bad)' : 'var(--muted)'; }));
         $$('[data-k]', m).forEach(inp => inp.addEventListener('input', () => { draft.kon[inp.dataset.k] = inp.value; }));
       };
@@ -186,6 +191,7 @@ async function templateKey() {
     const [tidT, sid] = draft.bSlot.split('/');
     const test = t.testler.find(x => x.id === tidT); const sl = test && test.slots.find(x => x.id === sid);
     if (!sl) { await alertDlg('Ders seçin.'); return false; }
+    if (/\?/.test(draft.bAns)) { await alertDlg('Görselden okunamayan cevaplar (?) var. Lütfen düzeltin.'); return false; }
     const ans = draft.bAns.toUpperCase().replace(/[^A-E]/g, '');
     if (!ans.length) { await alertDlg('Cevapları yazın.'); return false; }
     if (t.secenek === 4 && /E/.test(ans)) { await alertDlg(`${t.ad} sorularında E şıkkı yoktur.`); return false; }
@@ -197,6 +203,7 @@ async function templateKey() {
   }
   for (const test of t.testler) {
     const k = t.id + '/' + test.id;
+    if (/\?/.test(draft.ans[k] || '')) { await alertDlg(`${test.ad}: görselden okunamayan cevaplar (?) var. Lütfen düzeltin.`); return false; }
     const ans = (draft.ans[k] || '').toUpperCase().replace(/[^A-E]/g, '');
     const n = test.slots.reduce((a, x) => a + x.n, 0);
     if (!ans.length) { atlandi = true; continue; }
