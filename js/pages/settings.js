@@ -4,6 +4,8 @@ import { esc, $, $$, pickFiles, makeCanvas, downloadFile, stamp, fmtNum } from '
 import { modal, confirmDlg, toast, progress, guard, alertDlg } from '../ui.js';
 import { exportBackup, importBackup } from '../importers.js';
 import { refresh } from '../app.js';
+import { API_DEFAULT } from '../config.js';
+import { testServer } from '../online.js';
 
 export async function render(host) {
   const s = state.settings;
@@ -61,8 +63,16 @@ export async function render(host) {
       <label class="fld"><span>Numara hane sayısı</span><input id="s-hane" type="number" min="3" max="10" value="${s.noHane}"></label></div>
       <p class="small muted">Yeni üretilen formlara uygulanır. Önceden basılmış formlar kendi ayarıyla okunur.</p></section>
   </div>
+  <section class="card" style="margin-top:16px"><h3>Online sınav</h3>
+    <p class="small muted" style="margin-top:0">Online yayınladığınız ödev ve denemeler bu sunucu üzerinden öğrencilere ulaşır. Sunucuya yalnızca yayınladığınız sınavın soruları ve cevap anahtarı gider; soru bankanız gitmez. Çoğu durumda buradaki ayarı değiştirmeniz gerekmez.</p>
+    <div class="form-grid">
+      <label class="fld"><span>Sunucu adresi</span><input id="s-api" value="${esc(s.onlineApi || '')}" placeholder="${esc(API_DEFAULT)}"><small>Boş bırakırsanız ${esc(API_DEFAULT)} kullanılır.</small></label>
+      <label class="fld"><span>Yayın anahtarı <small>(sunucu istiyorsa)</small></span><input id="s-okey" type="password" autocomplete="off" value="${esc(s.onlineKey || '')}"></label>
+    </div>
+    <div class="row gap" style="margin-top:10px"><button class="btn sm" id="s-apit">Bağlantıyı sına</button><span class="small" id="s-apir"></span></div>
+  </section>
   <section class="card" style="margin-top:16px"><h3>Veriler ve yedek</h3>
-    <p class="muted" style="margin-top:0">Tüm sorularınız, öğrencileriniz ve sınavlarınız yalnızca bu tarayıcıda saklanır; hiçbir sunucuya gönderilmez. Tarayıcı verilerini temizlerseniz ya da başka bilgisayara geçerseniz yedek dosyanızla geri yükleyebilirsiniz.</p>
+    <p class="muted" style="margin-top:0">Tüm sorularınız, öğrencileriniz ve sınavlarınız yalnızca bu tarayıcıda saklanır; online yayınladığınız sınavlar dışında hiçbir şey sunucuya gönderilmez. Tarayıcı verilerini temizlerseniz ya da başka bilgisayara geçerseniz yedek dosyanızla geri yükleyebilirsiniz.</p>
     <div class="grid g4" style="margin:12px 0">
       <div class="stat"><div class="v">${fmtNum(state.questions.size, 0)}</div><div class="l">soru</div></div>
       <div class="stat"><div class="v">${fmtNum(state.students.size, 0)}</div><div class="l">öğrenci</div></div>
@@ -78,6 +88,13 @@ export async function render(host) {
   const save = guard(async (patch, msg = 'Kaydedildi') => { await saveSettings(patch); toast(msg); });
   const num = (id, key, min, max) => $(id, host).addEventListener('change', e => { let v = Number(e.target.value); if (Number.isNaN(v)) v = DEFAULT_SETTINGS[key]; v = Math.max(min, Math.min(max, v)); e.target.value = v; save({ [key]: v }); });
   $('#s-kurum', host).addEventListener('change', e => save({ kurum: e.target.value.trim() }));
+  $('#s-api', host).addEventListener('change', e => { const v = e.target.value.trim().replace(/\/+$/, ''); if (v && !/^https?:\/\//i.test(v)) { toast('Adres https:// ile başlamalı.', 'err'); return; } save({ onlineApi: v }); });
+  $('#s-okey', host).addEventListener('change', e => save({ onlineKey: e.target.value.trim() }));
+  $('#s-apit', host).addEventListener('click', guard(async () => {
+    const out = $('#s-apir', host); out.textContent = 'Bağlanılıyor…'; out.style.color = '';
+    try { const r = await testServer(s.onlineApi || API_DEFAULT, s.onlineKey); out.textContent = r.keyNeeded ? 'Sunucu çalışıyor, ama yayın anahtarı istiyor. Anahtarı yukarıya yazın.' : 'Sunucu çalışıyor.'; out.style.color = r.keyNeeded ? 'var(--warn)' : 'var(--ok)'; }
+    catch (e) { out.textContent = e.message; out.style.color = 'var(--bad)'; }
+  }));
   $$('#s-tur button', host).forEach(b => b.addEventListener('click', guard(async () => {
     const k = b.dataset.k;
     const want = derslerFor(k);

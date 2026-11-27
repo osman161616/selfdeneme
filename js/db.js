@@ -30,6 +30,8 @@ export const DEFAULT_SETTINGS = {
   secenekSayisi: 4,
   noHane: 6,
   sonYedek: 0,
+  onlineApi: '',
+  onlineKey: '',
 };
 
 export const state = {

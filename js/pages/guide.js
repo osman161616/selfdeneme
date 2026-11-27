@@ -4,7 +4,7 @@ export async function render(host) {
   host.innerHTML = `<article class="guide">
   <div class="page-head"><div><h1>Rehber</h1><p>selfdeneme ile soru bankanızı kurmaktan karneyi yazdırmaya kadar her adım. İlk kez kullanıyorsanız baştan sona bir kez okumanız yeterli; sonra ihtiyaç duyduğunuz bölüme dönebilirsiniz.</p></div></div>
   <nav class="toc scroll" aria-label="Bölümler">
-    <a href="#g-genel">Nasıl çalışır</a><a href="#g-banka">Soru bankası</a><a href="#g-kirp">Soru kırpma</a><a href="#g-toplu">Toplu yükleme</a><a href="#g-eski">Eski programdan geçiş</a><a href="#g-ogr">Öğrenciler</a><a href="#g-odev">Ödev</a><a href="#g-deneme">Deneme ve optik form</a><a href="#g-sinav">LGS ve YKS denemeleri</a><a href="#g-puan">Puan hesabı</a><a href="#g-okut">Formları okutma</a><a href="#g-analiz">Analiz ve karne</a><a href="#g-yedek">Yedek</a><a href="#g-sss">Sorunlar</a>
+    <a href="#g-genel">Nasıl çalışır</a><a href="#g-banka">Soru bankası</a><a href="#g-kirp">Soru kırpma</a><a href="#g-toplu">Toplu yükleme</a><a href="#g-eski">Eski programdan geçiş</a><a href="#g-ogr">Öğrenciler</a><a href="#g-odev">Ödev</a><a href="#g-deneme">Deneme ve optik form</a><a href="#g-online">Online çözdürme</a><a href="#g-sinav">LGS ve YKS denemeleri</a><a href="#g-puan">Puan hesabı</a><a href="#g-okut">Formları okutma</a><a href="#g-analiz">Analiz ve karne</a><a href="#g-yedek">Yedek</a><a href="#g-sss">Sorunlar</a>
   </nav>
 
   <h2 id="g-genel">Nasıl çalışır?</h2>
@@ -94,6 +94,18 @@ export async function render(host) {
   <div class="tip"><b>Yazdırırken:</b> Formları <b>gerçek boyutta (%100)</b> yazdırın; "sayfaya sığdır" seçeneğini kapatın. Renkli ya da siyah-beyaz fark etmez. Formun dört köşesindeki siyah kareler kesilmemeli.</div>
   <p>Öğrencilere söyleyin: koyu kurşun kalem kullanın, daireyi tamamen doldurun, değiştirirken iyice silin, formu katlamayın. Boş formda numarayı sağa yaslı yazıp kodlasınlar.</p>
   <p>Başka bir yayının denemesini de değerlendirebilirsiniz: <a href="#sinavlar">Sınavlar › Sınav değerlendir</a>'de cevap anahtarını elle yazın ya da CSV yükleyin, ardından o anahtar için boş optik form yazdırın.</p>
+
+  <h2 id="g-online">Online çözdürme: telefondan ya da bilgisayardan</h2>
+  <p>Hazırladığınız her ödevi ve denemeyi kâğıt basmadan da çözdürebilirsiniz. Öğrenci linki açar, soruları telefonunda ya da bilgisayarında görür, cevabını işaretler ve gönderir. Optik form, tarama, kontrol ekranı yok; cevaplar doğrudan size gelir.</p>
+  <ol><li><a href="#hazirla">Ödev ve Deneme › Hazırlanan belgeler</a>'de belgenin yanındaki <b>Online yayınla</b>'ya basın. (Ödevi ya da denemeyi hazırladığınız anda çıkan pencerede de aynı düğme var.)</li>
+  <li>Başlangıç ve bitiş saatini, varsa süreyi seçin. LGS ve YKS denemelerinde resmî süre kendiliğinden gelir. Süre, öğrenci "Başla"ya bastığı anda işlemeye başlar; bitince cevaplar kendiliğinden gönderilir.</li>
+  <li>Kimlerin çözebileceğini seçin. Öğrenci listesinden seçerseniz yalnızca o numaralar girebilir; öğrenci numarasını yazınca adını görür ve "Bu benim" der. "Linki alan herkes" seçeneğinde öğrenci numarasıyla birlikte adını ve şubesini kendisi yazar.</li>
+  <li>Öğrencinin sonucunu ne zaman göreceğine karar verin: hemen, sınav bittikten sonra ya da hiç (siz paylaşırsınız). Deneme yapıyorsanız "bittikten sonra" seçin; yoksa ilk bitiren cevapları arkadaşlarına söyleyebilir.</li>
+  <li><b>Yayınla</b>'ya basınca linki ve karekodu alırsınız. Linki WhatsApp grubuna atabilir ya da karekodu tahtaya yansıtabilirsiniz. Öğrenciler sitedeki <code>coz</code> sayfasına girip 8 haneli sınav koduyla da girebilir.</li></ol>
+  <p>Sınav sürerken aynı penceredeki <b>Yenile</b> ile kaç öğrencinin gönderdiğini görürsünüz. Bitince <b>Sonuçları sınava aktar</b>'a basın; sonuçlar Sınavlar sayfasına optik formdan okunmuş gibi gelir, karne, sıralı liste ve seviye analizi her zamanki gibi çalışır. Geç gönderenler olursa bir kez daha aktarmanız yeterli, aynı öğrenci iki kez eklenmez.</p>
+  <div class="tip"><b>Öğrenci açısından:</b> Cevaplar her işaretlemede telefona kaydedilir. İnternet giderse ya da sayfa kapanırsa linki yeniden açıp kaldığı yerden devam eder; süreli sınavlarda süre bu arada işlemeye devam eder. Her öğrenci sınavı bir kez gönderebilir. Yanlışlıkla gönderen ya da sorun yaşayan öğrenci için yönetim penceresindeki gönderenler listesinden <b>Yeniden çözsün</b>'e basabilirsiniz.</div>
+  <p>Sonucu açık olan öğrenci gönderir göndermez netini, tahmini puanını, ders ders doğru-yanlışlarını ve hangi konularda zorlandığını görür; yanlış ve boş bıraktığı soruları doğru cevaplarıyla birlikte tek tek inceleyebilir. Okul bilgisayarında sırayla çözüyorlarsa sonuç ekranındaki "Bu cihazda başka bir öğrenci olarak gir" bağlantısını gösterin.</p>
+  <p class="small muted">Online sınav için sunucuya yalnızca o sınavın soruları, cevap anahtarı ve seçtiğiniz öğrencilerin numarasıyla adının kısaltması ("Ali Y.") gider; soru bankanız gitmez. Sınav, bitiş saatinden 30 gün sonra sunucudan kendiliğinden silinir; isterseniz <b>Yayını kaldır</b> ile hemen de silebilirsiniz. Aktardığınız sonuçlar bilgisayarınızda kalır.</p>
 
   <h2 id="g-sinav">LGS ve YKS denemeleri</h2>
   <p>Deneme hazırlarken <b>Sınav türü</b> olarak LGS, TYT, AYT ya da YDT seçerseniz deneme resmî sınavla birebir aynı düzende olur: aynı testler, aynı sıra, aynı soru sayıları, aynı şık sayısı. Kitapçıkta her test yeni sayfada başlar ve numaralar test içinde sürer (TYT Sosyal Bilimler 1–25 gibi). Optik form da aynı düzende basılır.</p>

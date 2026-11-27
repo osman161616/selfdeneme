@@ -62,12 +62,13 @@ function renderList(host) {
   }
 }
 
+function onlineDocOf(exam) { const d = exam.docId && state.docs.get(exam.docId); return d && d.online && d.online.examId === exam.id ? d : null; }
 function renderDetail(host, exam) {
   const r = evaluateExam(exam);
   const subeler = [...new Set([...r.ogr.values()].map(o => o.sube || ''))].sort(cmpTr);
   host.innerHTML = `
   <div class="page-head"><div><a href="#sinavlar" id="d-back" class="small">‹ Tüm sınavlar</a><h1 style="margin-top:6px">${esc(exam.isim)}</h1><p>${r.tpl ? `<span class="pill">${esc(r.tpl.ad)}${r.kismi ? ' · branş/kısmi' : ''}</span> ` : ''}${fmtDate(exam.tarih)} · ${r.ogr.size} öğrenci · ${exam.sorular.length} soru${r.tpl && r.tpl.tytGerekli ? (r.tytExam ? ` · TYT eşleşmesi: ${esc(r.tytExam.isim)}` : ' · <b style="color:var(--bad)">TYT eşleşmesi yok</b>') : ''}</p></div>
-    <div class="row gap"><button class="btn" id="d-add">Sonuç ekle</button><button class="btn primary" id="d-karne">Karneler ve listeler</button></div></div>
+    <div class="row gap">${onlineDocOf(exam) ? '<button class="btn" id="d-onl">Online gönderimler</button>' : ''}<button class="btn" id="d-add">Sonuç ekle</button><button class="btn primary" id="d-karne">Karneler ve listeler</button></div></div>
   <div class="grid g4">
     <div class="stat brand"><div class="v">${fmtNum(r.kurum.puanOrt, 1)}</div><div class="l">kurum ortalaması · ${puanEtiket(exam, r)}</div></div>
     <div class="stat"><div class="v">${fmtNum(r.kurum.netOrt, 2)}</div><div class="l">ortalama net</div></div>
@@ -84,6 +85,7 @@ function renderDetail(host, exam) {
   $('#d-back', host).addEventListener('click', e => { e.preventDefault(); ev.open = null; render(host); });
   $$('.tabs button', host).forEach(b => b.addEventListener('click', () => { ev.tab = b.dataset.t; render(host); }));
   $('#d-add', host).addEventListener('click', () => { startWizard({ addTo: exam.id }); render(host); });
+  const onb = $('#d-onl', host); if (onb) onb.addEventListener('click', guard(async () => { const { manageDialog } = await import('../online.js'); await manageDialog(onlineDocOf(exam)); render(host); }));
   $('#d-karne', host).addEventListener('click', guard(() => karneDialog(exam, subeler)));
   const body = $('#d-body', host);
   if (ev.tab === 'sonuc') tabResults(body, exam, r, subeler, host);

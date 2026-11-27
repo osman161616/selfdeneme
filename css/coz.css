@@ -1,0 +1,77 @@
+/* Öğrenci çözüm sayfası */
+body.cz{min-height:100vh}
+.cz-head{display:flex;align-items:center;justify-content:space-between;padding:12px clamp(14px,4vw,32px);border-bottom:1px solid var(--line);background:var(--panel)}
+.cz-brand{display:flex;align-items:center;gap:9px;text-decoration:none;color:var(--ink)}
+.cz-brand b{font-family:Archivo,sans-serif;font-size:19px;font-weight:800;letter-spacing:-.02em}
+.cz-brand b span{color:var(--brand)}
+.cz-main{max-width:820px;margin:0 auto;padding:18px clamp(12px,4vw,28px) 40px}
+.cz-main>.card+.card,.cz-main>section+section{margin-top:14px}
+.cz-intro h1{font-size:clamp(24px,5vw,34px)}
+.cz-chips{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0 6px}
+.cz-count{font:800 clamp(26px,7vw,40px) Archivo,sans-serif;margin:10px 0}
+.cz-wait{margin-top:14px}
+.cz-rules{padding-left:20px;margin:6px 0}
+.cz-rules li{margin:6px 0}
+.cz-dl{margin-top:14px;display:grid;gap:6px}
+.cz-bar-p{height:8px;border-radius:99px;background:var(--panel2);border:1px solid var(--line);overflow:hidden}
+.cz-bar-p i{display:block;height:100%;width:0;background:var(--brand);transition:width .2s}
+.cz-who h2{font-size:28px}
+
+/* Çözüm */
+body.cz-solving .cz-head{display:none}
+body.cz-solving .cz-main{padding-top:0;padding-bottom:150px;max-width:900px}
+.cz-bar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:8px;padding:10px 0;background:var(--bg);border-bottom:1px solid var(--line);margin-bottom:12px}
+.cz-t{flex:1;display:flex;flex-direction:column;line-height:1.25;overflow:hidden}
+.cz-t b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:14.5px}
+.cz-timer{font:700 17px ui-monospace,Menlo,monospace;padding:5px 10px;border-radius:8px;background:var(--panel);border:1px solid var(--line);font-variant-numeric:tabular-nums}
+.cz-timer.low{background:var(--lv1);color:var(--bad);border-color:var(--bad)}
+.cz-q{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:12px;box-shadow:var(--shadow)}
+.cz-qh{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;font-weight:650}
+.cz-flag{border:1px solid var(--line);background:var(--panel2);border-radius:99px;padding:5px 12px;font:600 13px Inter,sans-serif;color:var(--muted);cursor:pointer;white-space:nowrap}
+.cz-flag.on{background:var(--lv2);color:var(--warn);border-color:var(--warn)}
+.cz-flag.ok{background:var(--lv4);color:var(--ok);border-color:var(--ok);cursor:default}
+.cz-flag.bad{background:var(--lv1);color:var(--bad);border-color:var(--bad);cursor:default}
+.cz-note{font-size:13.5px;background:var(--tint2);border-left:3px solid var(--warn);padding:6px 10px;border-radius:6px;margin-bottom:8px}
+.cz-img{background:#fff;border-radius:8px;overflow:auto;text-align:center;padding:6px}
+.cz-img img{max-width:100%;height:auto;cursor:zoom-in;display:inline-block;vertical-align:top}
+.cz-img.zoom img{max-width:none;width:auto!important;cursor:zoom-out}
+.cz-dock{position:fixed;left:0;right:0;bottom:0;z-index:30;background:color-mix(in srgb,var(--panel) 94%,transparent);backdrop-filter:blur(6px);border-top:1px solid var(--line);padding:10px clamp(10px,4vw,28px) calc(10px + env(safe-area-inset-bottom))}
+.cz-dock>*{max-width:860px;margin:0 auto}
+.cz-opts{display:flex;gap:8px;justify-content:center}
+.cz-opt{flex:1;max-width:96px;height:54px;border-radius:50%;aspect-ratio:1;max-height:54px;width:54px;flex:0 0 54px;border:2px solid var(--brand);background:var(--panel);color:var(--brand-d);font:800 20px Archivo,sans-serif;cursor:pointer;transition:transform .08s}
+.cz-opt:active{transform:scale(.94)}
+.cz-opt.sel{background:var(--graphite);border-color:var(--graphite);color:var(--panel)}
+.cz-opt.right{background:var(--ok);border-color:var(--ok);color:#fff}
+.cz-opt.wrong{background:var(--bad);border-color:var(--bad);color:#fff}
+.cz-opt:disabled{cursor:default;opacity:1}
+.cz-opt:disabled:not(.right):not(.wrong){opacity:.45}
+.cz-nav{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:8px}
+.cz-nav .btn{min-height:38px}
+.cz-gh{margin:14px 0 6px;font-size:14px}
+.cz-pal{display:grid;grid-template-columns:repeat(auto-fill,minmax(46px,1fr));gap:6px}
+.cz-cell{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:46px;border:1px solid var(--line);border-radius:9px;background:var(--panel);font:700 14px Inter,sans-serif;color:var(--ink);cursor:pointer;line-height:1.1;padding:3px}
+.cz-cell small{font-size:11px;font-weight:600;color:var(--muted)}
+.cz-cell.done{background:var(--tint);border-color:var(--brand)}
+.cz-cell.flag{box-shadow:inset 0 -4px 0 var(--warn)}
+.cz-cell.cur{outline:2px solid var(--graphite);outline-offset:1px}
+.cz-cell.right{background:var(--lv4);border-color:var(--ok)}
+.cz-cell.wrong{background:var(--lv1);border-color:var(--bad)}
+.cz-cell.blank{background:var(--panel2)}
+.cz-cell.off{opacity:.45}
+.cz-lg{display:inline-block;width:12px;height:12px;border-radius:3px;border:1px solid var(--line);vertical-align:-1px;margin:0 3px 0 8px}
+.cz-lg.done{background:var(--tint);border-color:var(--brand)}.cz-lg.flag{box-shadow:inset 0 -4px 0 var(--warn)}
+.cz-lg.right{background:var(--lv4);border-color:var(--ok)}.cz-lg.wrong{background:var(--lv1);border-color:var(--bad)}.cz-lg.blank{background:var(--panel2)}
+
+/* Sonuç */
+.cz-sent{display:flex;gap:12px;align-items:center;margin-top:14px;padding:12px;border-radius:10px;background:var(--lv4)}
+.cz-ok{display:grid;place-items:center;width:34px;height:34px;border-radius:50%;background:var(--ok);color:#fff;font-weight:800;flex:0 0 34px}
+.cz-rc{font:700 15px ui-monospace,monospace;letter-spacing:.04em;background:var(--panel2);padding:2px 6px;border-radius:5px;user-select:all}
+.cz-tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:12px}
+.cz-tile{border:1px solid var(--line);border-radius:10px;padding:10px;text-align:center;background:var(--panel2)}
+.cz-tile b{display:block;font:800 26px Archivo,sans-serif}
+.cz-tile span{font-size:12.5px;color:var(--muted)}
+.cz-tile.ok b{color:var(--ok)}.cz-tile.bad b{color:var(--bad)}.cz-tile.brand b{color:var(--brand-d)}
+.cz-puan{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+.cz-puan>div{flex:1;min-width:140px;border:1px solid var(--line);border-radius:10px;padding:8px 12px;display:flex;flex-direction:column}
+.cz-puan b{font:800 22px Archivo,sans-serif}
+@media (max-width:480px){.cz-opt{width:48px;height:48px;flex-basis:48px;font-size:18px}.cz-tile b{font-size:22px}.cz-bar #z-pal{padding:6px 9px}}

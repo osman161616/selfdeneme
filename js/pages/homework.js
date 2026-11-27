@@ -1,6 +1,7 @@
 import { state, dersList, subeList, sortDersler, deleteDoc, markSeen, saveDoc } from '../db.js';
 import { esc, $, $$, cmpTr, trLower, debounce, fmtDate, fmtPct, todayISO, safeFile, stamp, LETTERS } from '../util.js';
 import { modal, confirmDlg, toast, progress, emptyState, guard, optionList, alertDlg } from '../ui.js';
+import { publishDialog } from '../online.js';
 import { poolFor, availableCount, selectQuestions, autoPlan, selectAuto, makeBooklet, resultsDialog, pdfFile, csvFile, zipFiles, recordDoc, mergePdfs, buildAnswerKeyPdf, keyToCsvRows } from '../generate.js';
 import { formSpecFromQuestions, buildFormsPdf } from '../omr.js';
 import { SABLONLAR, sablon, sablonlarFor } from '../sinavlar.js';
@@ -215,10 +216,15 @@ async function generateManual(host) {
     if (nos.length) await markSeen(nos, picked.map(q => q.id));
     const doc = await recordDoc({ tur: hv.tur, isim: title, sorular: r.key, ogrenciler: nos, ...docExtra });
     pg.close();
-    const extra = hv.tur === 'deneme' ? `<div class="banner" style="border-left-color:var(--brand);margin-top:0"><span>Sınavdan sonra formları tarayın ya da fotoğraflayın; <b>Sınavlar ve Optik</b> sayfasında bu denemeyi seçip okutun.</span><button class="btn sm" id="go-eval">Değerlendirmeye git</button></div>` : '';
+    const extra = (hv.tur === 'deneme' ? `<div class="banner" style="border-left-color:var(--brand);margin-top:0"><span>Sınavdan sonra formları tarayın ya da fotoğraflayın; <b>Sınavlar ve Optik</b> sayfasında bu denemeyi seçip okutun.</span><button class="btn sm" id="go-eval">Değerlendirmeye git</button></div>` : '') + `<div class="banner" style="border-left-color:var(--ok);margin-top:0"><span><b>Online da çözülebilir.</b> Yayınlarsanız öğrenciler linkten telefonda ya da bilgisayarda çözer, sonuçlar buraya gelir.</span><button class="btn sm" id="go-online">Online yayınla</button></div>`;
+    let wantOnline = false;
     const p = resultsDialog(hv.tur === 'deneme' ? 'Deneme hazır' : 'Ödev hazır', files, extra);
-    setTimeout(() => { const b = document.getElementById('go-eval'); if (b) b.addEventListener('click', () => { document.querySelector('.modal-back [data-x]')?.click(); go('sinavlar', { yeniDoc: doc.id }); }); }, 50);
+    setTimeout(() => {
+      const b = document.getElementById('go-eval'); if (b) b.addEventListener('click', () => { document.querySelector('.modal-back [data-x]')?.click(); go('sinavlar', { yeniDoc: doc.id }); });
+      const o = document.getElementById('go-online'); if (o) o.addEventListener('click', () => { wantOnline = true; document.querySelector('.modal-back [data-x]')?.click(); });
+    }, 50);
     await p;
+    if (wantOnline) await publishDialog(doc);
   } finally { pg.close(); }
   render(host);
 }
@@ -380,10 +386,15 @@ async function generateTemplate(host) {
     const doc = await recordDoc({ tur: 'deneme', sablon: t.id, kismi: !tamMi(), isim: title, sorular: r.key, ogrenciler: nos, form: spec, pdf: new Blob([r.pdf], { type: 'application/pdf' }) });
     pg.close();
     const files = [pdfFile('Soru kitapçığı', title, r.pdf, `${r.pages} sayfa, ${r.key.length} soru`), pdfFile('Cevap anahtarı', `${title}_cevap_anahtari`, kp), csvFile('Cevap anahtarı (CSV)', `${title}_cevap_anahtari`, keyToCsvRows(r.key)), pdfFile('Optik formlar', `${title}_optik_formlar`, forms, `${people.length} kişiye özel + ${blank} boş`)];
-    const extra = `<div class="banner" style="border-left-color:var(--brand);margin-top:0"><span>Sınavdan sonra formları okutmak için <b>Sınavlar ve Optik</b> sayfasında bu denemeyi seçin.${t.tytGerekli ? ' AYT/YDT puanları için öğrencilerin TYT denemesiyle eşleştirme yapılır.' : ''}</span><button class="btn sm" id="go-eval">Değerlendirmeye git</button></div>`;
+    const extra = `<div class="banner" style="border-left-color:var(--brand);margin-top:0"><span>Sınavdan sonra formları okutmak için <b>Sınavlar ve Optik</b> sayfasında bu denemeyi seçin.${t.tytGerekli ? ' AYT/YDT puanları için öğrencilerin TYT denemesiyle eşleştirme yapılır.' : ''}</span><button class="btn sm" id="go-eval">Değerlendirmeye git</button></div><div class="banner" style="border-left-color:var(--ok);margin-top:0"><span><b>Online da çözülebilir.</b> Yayınlarsanız öğrenciler linkten telefonda ya da bilgisayarda çözer, sonuçlar buraya gelir.</span><button class="btn sm" id="go-online">Online yayınla</button></div>`;
+    let wantOnline = false;
     const pr = resultsDialog(`${title} hazır`, files, extra);
-    setTimeout(() => { const b = document.getElementById('go-eval'); if (b) b.addEventListener('click', () => { document.querySelector('.modal-back [data-x]')?.click(); go('sinavlar', { yeniDoc: doc.id }); }); }, 50);
+    setTimeout(() => {
+      const b = document.getElementById('go-eval'); if (b) b.addEventListener('click', () => { document.querySelector('.modal-back [data-x]')?.click(); go('sinavlar', { yeniDoc: doc.id }); });
+      const o = document.getElementById('go-online'); if (o) o.addEventListener('click', () => { wantOnline = true; document.querySelector('.modal-back [data-x]')?.click(); });
+    }, 50);
     await pr;
+    if (wantOnline) await publishDialog(doc);
   } finally { pg.close(); }
   render(host);
 }
@@ -458,7 +469,7 @@ function renderDocs(body, host) {
   if (!docs.length) { body.innerHTML = `<div class="card">${emptyState('Henüz belge hazırlanmadı', 'Hazırladığınız ödev ve denemeler burada listelenir; cevap anahtarını ve optik formları buradan yeniden indirebilirsiniz.')}</div>`; return; }
   body.innerHTML = `<div class="card"><div class="scroll"><table class="tbl"><thead><tr><th>Tarih</th><th>Tür</th><th>Başlık</th><th class="num">Soru</th><th>Öğrenci</th><th></th></tr></thead><tbody>
     ${docs.map(d => `<tr><td>${fmtDate(d.tarih)}</td><td><span class="pill">${esc((d.sablon ? d.sablon + ' ' : '') + (TUR[d.tur] || d.tur))}</span></td><td>${esc(d.isim)}</td><td class="num">${d.sorular.length}</td><td class="small">${d.ogrenciler.length === 1 ? esc(stuLabel(d.ogrenciler[0])) : d.ogrenciler.length ? d.ogrenciler.length + ' öğrenci' : '-'}</td>
-    <td><div class="row gap-s end">${d.tur === 'deneme' ? `<button class="btn sm primary" data-ev="${esc(d.id)}">Değerlendir</button><button class="btn sm" data-fm="${esc(d.id)}">Optik form</button>` : ''}${d.pdf ? `<button class="btn sm" data-pdf="${esc(d.id)}">Kitapçık</button>` : ''}<button class="btn sm" data-key="${esc(d.id)}">Cevap anahtarı</button><button class="icon-btn" data-del="${esc(d.id)}" aria-label="Kaydı sil">✕</button></div></td></tr>`).join('')}
+    <td><div class="row gap-s end">${d.tur === 'deneme' ? `<button class="btn sm primary" data-ev="${esc(d.id)}">Değerlendir</button><button class="btn sm" data-fm="${esc(d.id)}">Optik form</button>` : ''}${d.pdf ? `<button class="btn sm" data-pdf="${esc(d.id)}">Kitapçık</button>` : ''}<button class="btn sm ${d.online ? 'primary' : ''}" data-onl="${esc(d.id)}">${d.online ? 'Online ●' : 'Online yayınla'}</button><button class="btn sm" data-key="${esc(d.id)}">Cevap anahtarı</button><button class="icon-btn" data-del="${esc(d.id)}" aria-label="Kaydı sil">✕</button></div></td></tr>`).join('')}
   </tbody></table></div><p class="small muted">Kayıt silmek öğrencilerin görülen soru geçmişini değiştirmez.</p></div>`;
   $$('[data-ev]', body).forEach(b => b.addEventListener('click', () => go('sinavlar', { yeniDoc: b.dataset.ev })));
   $$('[data-pdf]', body).forEach(b => b.addEventListener('click', guard(async () => { const d = state.docs.get(b.dataset.pdf); await resultsDialog('Soru kitapçığı', [{ label: 'Soru kitapçığı', filename: safeFile(d.isim) + '.pdf', data: d.pdf, mime: 'application/pdf' }]); })));
@@ -468,8 +479,11 @@ function renderDocs(body, host) {
     await resultsDialog('Cevap anahtarı', [pdfFile('Cevap anahtarı', `${d.isim}_cevap_anahtari`, kp), csvFile('Cevap anahtarı (CSV)', `${d.isim}_cevap_anahtari`, keyToCsvRows(d.sorular))]);
   })));
   $$('[data-fm]', body).forEach(b => b.addEventListener('click', guard(async () => { await formDialog(state.docs.get(b.dataset.fm)); })));
+  $$('[data-onl]', body).forEach(b => b.addEventListener('click', guard(async () => { await publishDialog(state.docs.get(b.dataset.onl)); render(host); })));
   $$('[data-del]', body).forEach(b => b.addEventListener('click', guard(async () => {
-    if (!await confirmDlg('Belge kaydı silinsin mi? (Sınav sonuçları ve öğrenci geçmişi etkilenmez.)', { ok: 'Sil', danger: true })) return;
+    const dd = state.docs.get(b.dataset.del);
+    if (!await confirmDlg(`Belge kaydı silinsin mi? (Sınav sonuçları ve öğrenci geçmişi etkilenmez.)${dd && dd.online ? ' Bu belge online yayında; yayın da sunucudan kaldırılır ve aktarılmamış gönderimler kaybolur.' : ''}`, { ok: 'Sil', danger: true })) return;
+    if (dd && dd.online) { try { const { api } = await import('../onlinepkg.js'); await api(dd.online.api, `/e/${dd.online.id}`, { method: 'DELETE', token: dd.online.token }); } catch { /* sunucuda kendiliğinden silinir */ } }
     await deleteDoc(b.dataset.del); render(host);
   })));
 }

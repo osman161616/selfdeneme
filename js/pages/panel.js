@@ -38,8 +38,8 @@ export async function render(host) {
   ${empty ? `
   <section class="hero">
     <div>
-      <h1>Kendinize özel <span>deneme ve ödev</span> hazırlayın.</h1>
-      <p>LGS, TYT, AYT ve YDT düzeninde denemeler; analize göre kişiselleştirilmiş ödevler; fotokopi makinesi ya da telefonla optik okuma; konu konu seviye analizi. Kurulum yok, üyelik yok; her şey ücretsiz.</p>
+      <h1>Kendi soru bankanızdan <span>ödev ve deneme</span> hazırlayın.</h1>
+      <p>LGS, TYT, AYT ve YDT düzeninde denemeler; öğrenciye daha önce görmediği sorular; fotokopi makinesi ya da telefonla optik okuma; konu konu seviye analizi. Kurulum yok, üyelik yok; tüm veriler kendi bilgisayarınızda kalır.</p>
       <div class="row gap" style="margin-top:18px">
         <a class="btn primary" href="#rehber">Rehberle başla</a>
         <button class="btn" id="btn-sample">Örnek verilerle dene</button>

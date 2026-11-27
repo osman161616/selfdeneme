@@ -281,3 +281,12 @@ input:focus,select:focus,textarea:focus{border-color:var(--brand);outline:none;b
 .kocr-res .small{flex:1;min-width:220px;line-height:1.7}
 .kocr-key{font-family:ui-monospace,monospace;letter-spacing:.12em;word-break:break-all}
 .kocr-res[hidden]{display:none}
+
+/* Online sınav (öğretmen) */
+.grow{flex:1}.wrap{flex-wrap:wrap}
+.op-grid{display:grid;grid-template-columns:150px minmax(0,1fr);gap:18px;align-items:center}
+.op-qr{width:150px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:6px;cursor:zoom-in}
+.op-qr svg{display:block;width:100%;height:auto}
+.op-code{font:800 16px ui-monospace,monospace;letter-spacing:.08em}
+.op-stat{margin-top:14px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--panel2)}
+@media (max-width:600px){.op-grid{grid-template-columns:1fr}.op-qr{width:180px;margin:auto}}

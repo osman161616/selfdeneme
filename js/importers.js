@@ -28,7 +28,7 @@ export async function normalizeImage(blob, maxW = 2000) {
 export function parseName(fname) {
   const base = fname.replace(/\.[^.]+$/, '');
   const last = base.slice(-1).toUpperCase();
-  return { cevap: LETTERS.includes(last) ? last : '', yatayByName: fname.startsWith('y') };
+  return { cevap: LETTERS.includes(last) ? last : '', yatayByName: /^y/i.test(fname) };
 }
 
 export function newQuestion({ ders, konu, zorluk, ad, cevap, yatay, blob, w, h, mmw, kaynak = '' }) {
