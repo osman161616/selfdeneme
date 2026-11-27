@@ -59,17 +59,17 @@ export async function render(host) {
   <tr><td><code>soru 4.png</code></td><td>Cevap tanınmaz; pencerede elle seçersiniz</td></tr></tbody></table></div>
   <p>Görseller beyaz zeminli ve okunaklı olmalı. Genişliği 800–2000 piksel arası idealdir; daha büyük görseller otomatik küçültülür.</p>
 
-  <h2 id="g-eski">Yöntem 3 · Bilgisayardan Hazır Klasör Olarak Yükleme</h2>
-  <p>Bilgisayarınızda görselleri hazırlayıp klsör olarak toplu içe aktarabilirsiniz. <a href="#banka">Soru Bankası › İçe aktar</a> ile programın yanındaki <code>banka</code> klasörünü seçin (ya da ZIP olarak sıkıştırıp seçin):</p>
+  <h2 id="g-eski">Yöntem 3 · Bilgisayardan hazır klasör olarak yükleme</h2>
+  <p>Soru görsellerini bilgisayarınızda klasörlere ayırıp hepsini tek seferde içe aktarabilirsiniz. Klasörleri aşağıdaki gibi düzenleyin: en üstte <code>banka</code>, içinde <code>sorular</code>, onun içinde ders, konu ve zorluk (1–5) klasörleri. Sonra <a href="#banka">Soru Bankası › İçe aktar</a>'a basıp <code>banka</code> klasörünü seçin (isterseniz ZIP olarak sıkıştırıp onu da seçebilirsiniz):</p>
   <pre>banka/
-├── sorular/
-│   └── Matematik/
-│       └── Üslü İfadeler/
-│           ├── 1/  soru01_a.png  soru02_d.png …
-│           ├── 2/  …
-│           └── 5/  y_grafik_c.png …
-
-  <p>Soru görsellerinin isimlerinin ilk harfi d veya y olursa yatay veya dikey olarak anlaşışır. İsmin son harfi ise cevap anahtarı olarak anlaşılır. Örnek olarak soru ismi "dSORUa" ise bu sorunun dikey ve cevabının a olduğu anlaşılır. </p>
+└── sorular/
+    └── Matematik/
+        └── Üslü İfadeler/
+            ├── 1/  dSORU01a.png  dSORU02d.png …
+            ├── 2/  …
+            └── 5/  ySORU07c.png …</pre>
+  <p>Görselin adının <b>ilk harfi</b> sorunun nasıl yerleşeceğini söyler: <b>y</b> ile başlıyorsa yatay, <b>d</b> ile başlıyorsa dikey. Adın <b>son harfi</b> de doğru cevaptır. Örneğin <code>dSORUa.png</code> dikey yerleşen ve cevabı A olan bir sorudur; <code>ySORU07c.png</code> ise yatay yerleşir, cevabı C'dir.</p>
+  <p>Eski masaüstü Ödev Programı'nın <code>banka</code> klasörü de tam bu düzende olduğu için doğrudan seçebilirsiniz; öğrenciler, sınavlar ve analizler de birlikte gelir. Aynı soru iki kez eklenmez, işlemi gönül rahatlığıyla tekrarlayabilirsiniz.</p>
 
   <h2 id="g-ogr">Öğrenciler</h2>
   <p><a href="#ogrenciler">Öğrenciler</a> sayfasında <b>Toplu ekle</b>'ye basıp e-Okul ya da Excel listenizden <b>numara, ad soyad, şube</b> sütunlarını kopyalayıp yapıştırın. Sütun sırası önemli değil. Şube <code>8A</code>, <code>8-B</code> gibi yazılabilir; sınıf düzeyi (8) şubeden otomatik çıkarılır.</p>
