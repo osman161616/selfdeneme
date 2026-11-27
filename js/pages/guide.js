@@ -8,7 +8,7 @@ export async function render(host) {
   </nav>
 
   <h2 id="g-genel">Nasıl çalışır?</h2>
-  <p>selfdeneme bir web sitesi gibi açılır ama bir masaüstü programı gibi çalışır: <b>bütün sorularınız, öğrenci listeniz ve sınav sonuçlarınız yalnızca kullandığınız tarayıcıda saklanır</b>. Hiçbir sunucuya yüklenmez, üyelik gerekmez. Bunun iki sonucu var:</p>
+  <p>selfdeneme kendi kendinize deneme ve ödev oluşturabileceğiniz bir platformdur: <b>bütün sorularınız, öğrenci listeniz ve sınav sonuçlarınız yalnızca kullandığınız tarayıcıda saklanır</b>. Hiçbir sunucuya yüklenmez, üyelik gerekmez. Bu yüzden:</p>
   <ul><li>Öğrenci bilgileri kurumunuzdan çıkmaz; kişisel verilerle ilgili ek bir yük oluşmaz.</li>
   <li>Verileriniz o bilgisayardaki o tarayıcıya bağlıdır. Başka bilgisayarda çalışmak ya da tarayıcı verilerini temizlemek istediğinizde <a href="#g-yedek">yedek dosyası</a> kullanırsınız.</li></ul>
   <p>Önerilen tarayıcılar: <b>Google Chrome</b> ya da <b>Microsoft Edge</b> (güncel sürüm). Firefox ve Safari de çalışır.</p>
@@ -59,8 +59,8 @@ export async function render(host) {
   <tr><td><code>soru 4.png</code></td><td>Cevap tanınmaz; pencerede elle seçersiniz</td></tr></tbody></table></div>
   <p>Görseller beyaz zeminli ve okunaklı olmalı. Genişliği 800–2000 piksel arası idealdir; daha büyük görseller otomatik küçültülür.</p>
 
-  <h2 id="g-eski">Yöntem 3 · Eski "Ödev Programı"ndan geçiş</h2>
-  <p>Masaüstündeki eski programı kullanıyorsanız hiçbir şeyi yeniden girmeniz gerekmez. <a href="#banka">Soru Bankası › İçe aktar</a> ile programın yanındaki <code>banka</code> klasörünü seçin (ya da ZIP olarak sıkıştırıp seçin):</p>
+  <h2 id="g-eski">Yöntem 3 · Bilgisayardan Hazır Klasör Olarak Yükleme</h2>
+  <p>Bilgisayarınızda görselleri hazırlayıp klsör olarak toplu içe aktarabilirsiniz. <a href="#banka">Soru Bankası › İçe aktar</a> ile programın yanındaki <code>banka</code> klasörünü seçin (ya da ZIP olarak sıkıştırıp seçin):</p>
   <pre>banka/
 ├── sorular/
 │   └── Matematik/
@@ -68,10 +68,8 @@ export async function render(host) {
 │           ├── 1/  soru01_a.png  soru02_d.png …
 │           ├── 2/  …
 │           └── 5/  y_grafik_c.png …
-├── ogrenciler/   1203.json  1207.json …
-├── sinavlar/     Deneme 1.json …
-└── soru_analizleri/soru_analiz_gecmisi.json</pre>
-  <p>Sorular (cevap ve yatay bilgisi dosya adından), öğrencilerin gördüğü soru geçmişleri, eski sınav sonuçları ve "analiz edildi" işaretleri birlikte aktarılır. Aynı soru iki kez aktarılmaz; işlemi gönül rahatlığıyla tekrarlayabilirsiniz.</p>
+
+  <p>Soru görsellerinin isimlerinin ilk harfi d veya y olursa yatay veya dikey olarak anlaşışır. İsmin son harfi ise cevap anahtarı olarak anlaşılır. Örnek olarak soru ismi "dSORUa" ise bu sorunun dikey ve cevabının a olduğu anlaşılır. </p>
 
   <h2 id="g-ogr">Öğrenciler</h2>
   <p><a href="#ogrenciler">Öğrenciler</a> sayfasında <b>Toplu ekle</b>'ye basıp e-Okul ya da Excel listenizden <b>numara, ad soyad, şube</b> sütunlarını kopyalayıp yapıştırın. Sütun sırası önemli değil. Şube <code>8A</code>, <code>8-B</code> gibi yazılabilir; sınıf düzeyi (8) şubeden otomatik çıkarılır.</p>
