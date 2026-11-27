@@ -312,7 +312,11 @@ async function runAuto(host, src) {
     const dersler = knownDersler();
     const old = S.auto && S.auto.src === src ? S.auto : null;
     freeAuto();
-    const secenek = res.tests.some(t => /E/.test(t.anahtar || '')) || state.settings.secenekSayisi === 5 ? 5 : 4;
+    // Şık sayısı önce sorulardan ("E)" var mı), yoksa anahtardan, o da yoksa ayarlardan
+    const soruTest = res.tests.filter(t => t.tur !== 'cozum');
+    const tespit = soruTest.filter(t => t.secenek);
+    const secenek = tespit.some(t => t.secenek === 5) || res.tests.some(t => /E/.test(t.anahtar || '')) ? 5
+      : tespit.length ? 4 : state.settings.secenekSayisi === 5 ? 5 : 4;
     S.auto = {
       src, scale, wm, secenek, warnings: res.warnings, anahtarSayfa: res.anahtarSayfa,
       tests: res.tests.map((t, i) => ({
@@ -435,6 +439,7 @@ function bindAuto(host, body) {
     expected: () => A.items.filter(i => i.test === +inp.dataset.ta).length,
     secenek: A.secenek,
     apply: k => { inp.value = k; inp.dispatchEvent(new Event('change')); },
+    onFive: k => { A.secenek = 5; inp.value = k; inp.dispatchEvent(new Event('change')); renderAuto(host); toast('Şık sayısı 5 yapıldı.'); },
   }));
   $$('[data-ta]', body).forEach(inp => inp.addEventListener('change', () => {
     const ti = +inp.dataset.ta;

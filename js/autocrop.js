@@ -391,18 +391,20 @@ export function detectQuestions(pages, opts = {}) {
     return pages[q0.page].items.filter(i => !i.rot && i.b < q0.rect.y + 2).map(i => i.str).join(' ');
   };
   tests.forEach(t => {
-    let withOpt = 0, withAns = 0;
+    let withOpt = 0, withAns = 0, withE = 0;
     t.cozumCevap = t.questions.map(q => {
       const its = regionItems(q);
       const letters = new Set();
       its.forEach(i => { const m = i.str.match(OPT); if (m) letters.add(m[1].toUpperCase()); });
-      if (letters.size >= 3) withOpt++;
+      if (letters.size >= 3) { withOpt++; if (letters.has('E')) withE++; }
       const m = its.map(i => i.str).join(' ').match(ANS);
       if (m) withAns++;
       return m ? m[1].toUpperCase() : '';
     });
     const n = t.questions.length || 1;
     t.secenekOrani = withOpt / n; t.cevapOrani = withAns / n;
+    // Şık sayısı: soruların en az %30'unda "E)" görülüyorsa 5, şıklar var ama E yoksa 4
+    t.secenek = withOpt ? (withE >= Math.max(1, 0.3 * withOpt) ? 5 : 4) : 0;
     t.ustYazi = firstTop(t);
   });
   tests.forEach((t, i) => {

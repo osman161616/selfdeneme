@@ -7,7 +7,7 @@ import { pickFiles, esc } from './util.js';
  * expected(): beklenen soru sayısı (bilinmiyorsa 0)
  * apply(str): okunan anahtarı kutuya yazar ("-" = okunamadı/boş)
  */
-export function attachKeyOcr(input, { expected = () => 0, apply, secenek = 5 } = {}) {
+export function attachKeyOcr(input, { expected = () => 0, apply, secenek = 5, onFive = null } = {}) {
   if (!input || input.dataset.kocr) return;
   input.dataset.kocr = '1';
   const row = document.createElement('div');
@@ -43,10 +43,11 @@ export function attachKeyOcr(input, { expected = () => 0, apply, secenek = 5 } =
       const uyum = !exp ? '' : g.length === exp ? `<span style="color:var(--ok)">✓ ${exp} sorunun hepsi</span>` : `<span style="color:var(--bad)">Testte ${exp} soru var, görselde ${g.length} cevap okundu.</span>`;
       box.innerHTML = `<img src="${url}" alt="">
         <div class="small"><b>Okunan:</b> <code class="kocr-key">${esc(g)}</code> (${g.length} cevap${bos ? `, ${bos} tanesi okunamadı: "-"` : ''}) ${uyum}
-        ${fazla ? '<br><span style="color:var(--bad)">Bu sınavda E şıkkı yok; görseli kontrol edin.</span>' : ''}
+        ${fazla ? (onFive ? '<br><span style="color:var(--bad)">Anahtarda E var ama sorular 4 şıklı görünüyor.</span> <button type="button" class="btn sm" data-five>Sorular 5 şıklı, E\'yi kabul et</button>' : '<br><span style="color:var(--bad)">Bu sınavda E şıkkı yok; görseli kontrol edin.</span>') : ''}
         ${groups.length > 1 ? `<br>Görselde ${groups.length} test var: ${groups.map((x, j) => `<button type="button" class="btn sm ${j === i ? '' : 'ghost'}" data-g="${j}">${j + 1}. (${x.length})</button>`).join(' ')}` : ''}
         <br><span class="muted">Görselle karşılaştırın; yanlış okunan harfi kutuda düzeltebilirsiniz.</span></div>`;
       box.querySelectorAll('[data-g]').forEach(b => b.addEventListener('click', () => show(+b.dataset.g)));
+      const fv = box.querySelector('[data-five]'); if (fv) fv.addEventListener('click', () => onFive(g));
     };
     show(idx);
   };
