@@ -290,3 +290,5 @@ input:focus,select:focus,textarea:focus{border-color:var(--brand);outline:none;b
 .op-code{font:800 16px ui-monospace,monospace;letter-spacing:.08em}
 .op-stat{margin-top:14px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--panel2)}
 @media (max-width:600px){.op-grid{grid-template-columns:1fr}.op-qr{width:180px;margin:auto}}
+.abol{margin-top:12px;padding:10px 12px;border:1px dashed var(--line);border-radius:10px;background:var(--panel2)}
+.abol-g{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;margin-top:6px}

@@ -31,6 +31,11 @@ export function normalizeItems(items, W, H) {
     if (!rot) {
       const base = H - f;
       const sz = Math.abs(d) || size;
+      const prev = out[out.length - 1];
+      // Ayrı parçalara bölünmüş soru numarası: "2" + "." → "2."
+      if (prev && !prev.rot && /^\d{1,2}$/.test(prev.str) && /^\d{0,2}[.)]/.test(str) && (prev.str + str).match(/^\d{1,3}[.)]/) && Math.abs(prev.base - base) < 0.8 && e - prev.r > -1 && e - prev.r < 1.6 && Math.abs(prev.size - sz) < 0.6) {
+        prev.str = prev.str + str; prev.r = e + (it.width || 0); continue;
+      }
       out.push({ str, x: e, y: base - sz * 0.8, r: e + (it.width || 0), b: base + sz * 0.22, size: sz, base, rot: false });
     } else {
       const ul = Math.hypot(a, b) || 1, vl = Math.hypot(c, d) || 1;
@@ -186,7 +191,7 @@ export function detectQuestions(pages, opts = {}) {
   chain.forEach((c, i) => {
     if (!cur || c.n <= chain[i - 1].n) { cur = { questions: [] }; tests.push(cur); }
     const p = chain[i - 1];
-    if (p && c.n > p.n + 1) warnings.push(`${tests.length}. testte ${p.n + 1}${c.n - 1 > p.n + 1 ? '–' + (c.n - 1) : ''}. soru bulunamadı.`);
+    if (p && c.n > p.n + 1) (cur.eksik = cur.eksik || []).push(`${p.n + 1}${c.n - 1 > p.n + 1 ? '–' + (c.n - 1) : ''}`);
     cur.questions.push(c);
   });
 
@@ -374,6 +379,30 @@ export function detectQuestions(pages, opts = {}) {
     let name = '', bc = 0;
     heads.forEach((v, k) => { if (v > bc || (v === bc && k.length < name.length)) { bc = v; name = k; } });
     t.baslik = name;
+    // ÖSYM/MEB düzeni: ilk sayfada "… TESTİ" adı, "1. DENEME" ve "Bu testte sırasıyla, Tarih-1 (25-34), …" yönergesi
+    const q0 = t.questions[0];
+    if (!q0) return;
+    const firstTxt = [q0.page - 1, q0.page].filter(pi => pi >= 0).map(pi => pages[pi].items.filter(i => !i.rot).map(i => i.str).join(' ')).join(' ').replace(/\s+/g, ' ');
+    const pageTxt = pages[q0.page].items.filter(i => !i.rot).map(i => i.str).join(' ').replace(/\s+/g, ' ');
+    const tm = [...pageTxt.matchAll(/([A-ZÇĞİÖŞÜ][A-ZÇĞİÖŞÜ0-9\- ]{3,80}?TEST[İI])(?![A-ZÇĞİÖŞÜa-zçğıöşü])/g)].map(m => m[1].trim()).filter(x => !/^BU TEST/.test(x));
+    const dm = pageTxt.match(/(?:^|\s)(\d{1,2})\.\s*DENEME\b/);
+    if (tm.length) {
+      const nice = tm[0].toLocaleLowerCase('tr-TR').replace(/(^|[\s\-])(\S)/g, (m, a, b) => a + b.toLocaleUpperCase('tr-TR')).replace(/ Ve /g, ' ve ');
+      t.baslik = (dm ? `${dm[1]}. Deneme · ` : '') + nice;
+    } else if (dm && t.baslik && !/DENEME/i.test(t.baslik)) t.baslik = `${dm[1]}. Deneme · ${t.baslik}`;
+    const im = firstTxt.match(/Bu testte(?: sırasıyla)?,?\s*(.{5,600}?)\s*(?:alanlarına|derslerine|alanına)?\s*ait/i);
+    if (im) {
+      const bol = [];
+      for (const m of im[1].matchAll(/([^()]{2,160}?)\s*\(\s*(\d{1,3})\s*[-–]\s*(\d{1,3})\s*\)/g)) {
+        let ad = m[1].split(',').pop().trim();
+        if (/ için /.test(ad)) ad = ad.split(/ için /).pop().trim();
+        ad = ad.replace(/^(ve|ile)\s+/i, '').trim();
+        if (ad && ad.length <= 60) bol.push({ ad, from: +m[2], to: +m[3] });
+      }
+      const lastN = t.questions[t.questions.length - 1].n;
+      const ok = bol.length >= 2 && bol[0].from === 1 && bol.every((b, k) => b.to >= b.from && (k === 0 || b.from === bol[k - 1].to + 1)) && bol[bol.length - 1].to >= lastN;
+      if (ok) t.bolumler = bol;
+    }
   });
 
   // 7) Soru testi mi, çözüm bölümü mü?
@@ -418,11 +447,32 @@ export function detectQuestions(pages, opts = {}) {
 
   // 8) Cevap anahtarı (soru bulunmayan sayfalarda "1. A" çiftleri) — yalnızca soru testleri için
   const qTests = tests.filter(t => t.tur === 'soru');
-  const key = findAnswerKey(pages, new Set(chain.map(c => c.page)), qTests.map(t => t.questions.length ? t.questions[t.questions.length - 1].n : 0));
-  if (key) qTests.forEach((t, i) => { t.anahtar = key.cols[i] || ''; t.anahtarKaynak = 'anahtar'; });
+  const qPages = new Set(qTests.flatMap(t => t.questions.map(q => q.page)));
+  const key = findAnswerKey(pages, qPages, qTests.map(t => t.questions.length ? t.questions[t.questions.length - 1].n : 0));
+  if (key) qTests.forEach((t, i) => {
+    const col = key.cols[i] || '';
+    // Harfleri soru numarasına göre yerleştir (arada bulunamayan soru varsa kayma olmasın)
+    t.anahtar = col.length >= t.questions[t.questions.length - 1].n ? t.questions.map(q => col[q.n - 1] || '-').join('') : col;
+    t.anahtarKaynak = 'anahtar';
+  });
   fillFromSolutions(tests);
 
-  return { tests, questions, stems, warnings, anahtarSayfa: key ? key.page + 1 : 0, body };
+  // Soru testi olmayan bölümleri (içindekiler, açıklama sayfası, cevap anahtarı) listeden çıkar
+  const keyPages = new Set(key ? key.pages : []);
+  const isJunk = t => t.tur === 'cozum' && t.cozumOf < 0 && !tests.some(o => o.cozumOf === tests.indexOf(t)) && t.cevapOrani < 0.5 && t.secenekOrani < 0.2
+    && (qTests.length > 0) && (t.questions.length < 3 || t.questions.every(q => keyPages.has(q.page)) || /İÇİNDEK|AÇIKLAMA|CEVAP ANAHTAR/i.test((t.baslik || '') + ' ' + (t.ustYazi || '')));
+  const keep = tests.filter(t => !isJunk(t));
+  let outTests = tests, outQ = questions;
+  if (keep.length !== tests.length && keep.length) {
+    const map = new Map(tests.map((t, i) => [i, keep.indexOf(t)]));
+    keep.forEach(t => { if (t.cozumOf >= 0) t.cozumOf = map.get(t.cozumOf); });
+    outQ = questions.filter(q => map.get(q.test) >= 0);
+    outQ.forEach(q => { q.test = map.get(q.test); });
+    outTests = keep;
+  }
+  outTests.forEach((t, i) => { if (t.tur === 'soru' && t.eksik) warnings.push(`${t.baslik ? t.baslik : (i + 1) + '. test'}: ${t.eksik.join(', ')}. soru bulunamadı.`); });
+
+  return { tests: outTests, questions: outQ, stems, warnings, anahtarSayfa: key ? key.page + 1 : 0, anahtarSayfalar: key ? key.pages.map(p => p + 1) : [], body };
 }
 
 /** Her çözüm bölümünü, aynı sayıda sorusu olan (tercihen önceki) soru testine bağla */
@@ -453,9 +503,34 @@ export function fillFromSolutions(tests) {
 }
 
 function findAnswerKey(pages, qPages, counts) {
-  for (let pi = pages.length - 1; pi >= 0; pi--) {
+  const want = counts.filter(Boolean);
+  const perPage = [];
+  for (let pi = 0; pi < pages.length; pi++) {
     if (qPages.has(pi)) continue;
-    const its = pages[pi].items.filter(i => !i.rot);
+    const cols = keyColsOf(pages[pi]);
+    if (cols && cols.length) perPage.push({ pi, cols });
+  }
+  // Tek sayfada bütün testlerin anahtarı
+  for (let k = perPage.length - 1; k >= 0; k--) {
+    const { pi, cols } = perPage[k];
+    const lens = cols.map(c => c.length);
+    if (want.length && lens.length === want.length && lens.every((l, i) => l === want[i])) return { page: pi, pages: [pi], cols };
+    if (want.length === 1 && lens.reduce((s, l) => s + l, 0) === want[0]) return { page: pi, pages: [pi], cols: [cols.join('')] };
+  }
+  // Birden çok sayfaya dağılmış anahtar (ör. her deneme için ayrı anahtar sayfası): sırayla birleştir
+  if (want.length > 1 && perPage.length > 1) {
+    const all = perPage.flatMap(p => p.cols.map(c => ({ c, pi: p.pi })));
+    if (all.length === want.length) {
+      const hit = all.filter((x, i) => x.c.length === want[i] || x.c.length === counts[i]).length;
+      if (hit >= Math.ceil(want.length * 0.7)) return { page: all[0].pi, pages: [...new Set(all.map(x => x.pi))], cols: all.map(x => x.c) };
+    }
+  }
+  return null;
+}
+
+function keyColsOf(page) {
+  {
+    const its = page.items.filter(i => !i.rot);
     const pairs = [];
     for (const it of its) {
       let m = it.str.match(/^(\d{1,3})[.)\-]?\s*([A-E])$/);
@@ -465,7 +540,7 @@ function findAnswerKey(pages, qPages, counts) {
       const L = its.filter(o => o !== it && Math.abs(o.base - it.base) < 2.5 && o.x >= it.r - 1 && o.x - it.r < 45 && /^[A-E]$/.test(o.str)).sort((a, b) => a.x - b.x)[0];
       if (L) pairs.push({ n: +m[1], L: L.str, x: L.x, y: it.base });
     }
-    if (pairs.length < 5) continue;
+    if (pairs.length < 5) return null;
     const kc = [];
     for (const p of pairs) { let k = kc.find(c => Math.abs(c.x - p.x) < 8); if (!k) { k = { x: p.x, ps: [] }; kc.push(k); } k.ps.push(p); }
     kc.sort((a, b) => a.x - b.x);
@@ -481,14 +556,8 @@ function findAnswerKey(pages, qPages, counts) {
       }
       if (curS) cols.push(curS);
     }
-    if (!cols.length) continue;
-    // Test sayılarıyla eşleşiyorsa kabul et
-    const want = counts.filter(Boolean);
-    const lens = cols.map(c => c.length);
-    if (want.length && lens.length === want.length && lens.every((l, i) => l === want[i])) return { page: pi, cols };
-    if (want.length === 1 && lens.reduce((s, l) => s + l, 0) === want[0]) return { page: pi, cols: [cols.join('')] };
+    return cols;
   }
-  return null;
 }
 
 /** Metindeki ders adını programın ders listesindeki ada eşle */

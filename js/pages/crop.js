@@ -326,6 +326,7 @@ async function runAuto(host, src) {
         zorluk: (old && old.tests[i] && old.tests[i].zorluk) || '3',
         anahtar: t.anahtar || '',
         anahtarKaynak: t.anahtarKaynak || '',
+        bolumler: t.bolumler ? t.bolumler.map((b, k) => ({ ...b, ders: (old && old.tests[i] && old.tests[i].bolumler && old.tests[i].bolumler[k] && old.tests[i].bolumler[k].ders) || matchDers(b.ad, dersler) || '' })) : null,
         tur: t.tur || 'soru', cozumOf: t.cozumOf ?? -1, goster: false,
         pages: [...new Set(t.questions.map(q => q.page + 1))],
       })),
@@ -340,6 +341,12 @@ async function runAuto(host, src) {
     S.autoView = true;
   } finally { pg.close(); }
   renderAuto(host);
+}
+
+/** Sorunun dersi: test bölümlere ayrılmışsa (ör. AYT: Edebiyat 1-24, Tarih-1 25-34) bölümün dersi */
+function itemDers(t, it) {
+  const b = t.bolumler && t.bolumler.find(x => it.n >= x.from && it.n <= x.to);
+  return (b && b.ders) || t.ders || '';
 }
 
 function testLabel(t, i) {
@@ -395,11 +402,12 @@ function renderAuto(host) {
         <div class="row gap wrap">${turSeg}<button class="btn sm ghost" data-all="${ti}">${its.every(i => i.include || i.saved) ? 'Hiçbirini seçme' : 'Tümünü seç'}</button></div>
       </div>
       <div class="grid g4" style="align-items:end">
-        <label class="fld"><span>Ders</span><input data-td="${ti}" list="a-dl" value="${esc(t.ders)}" placeholder="ör. Türkçe"></label>
+        ${t.bolumler ? `<div class="fld"><span>Ders</span><div class="small muted" style="padding:9px 0">${t.bolumler.length} bölüm, dersleri aşağıda</div></div>` : `<label class="fld"><span>Ders</span><input data-td="${ti}" list="a-dl" value="${esc(t.ders)}" placeholder="ör. Türkçe"></label>`}
         <label class="fld"><span>Konu <small>(bu testin tüm soruları)</small></span><input data-tk="${ti}" list="a-kl-${ti}" value="${esc(t.konu)}" placeholder="ör. LGS 2026 Çıkmış"><datalist id="a-kl-${ti}">${konuList(t.ders).map(d => `<option value="${esc(d)}">`).join('')}</datalist></label>
         <div class="fld"><span>Zorluk</span><div class="seg" data-tz="${ti}">${[1, 2, 3, 4, 5].map(z => `<button type="button" data-z="${z}" class="${String(z) === t.zorluk ? 'on' : ''}">${z}</button>`).join('')}</div></div>
         <label class="fld"><span>Cevap anahtarı <small>(ör. ABDAC…)</small></span><input data-ta="${ti}" value="${esc(its.map(i => i.cevap || '-').join(''))}" style="font-family:ui-monospace,monospace;letter-spacing:1px" spellcheck="false"></label>
       </div>
+      ${t.bolumler ? `<div class="abol"><span class="small muted">Bu test birden çok dersten oluşuyor. Her bölümün dersini kontrol edin:</span><div class="abol-g">${t.bolumler.map((b, k) => `<label class="fld"><span>${esc(b.ad)} <small>(${b.from}–${b.to})</small></span><input data-tb="${ti}:${k}" list="a-dl" value="${esc(b.ders)}" placeholder="Ders seçin"></label>`).join('')}</div></div>` : ''}
       <div class="agrid" style="margin-top:12px">${its.map(it => acard(it, A.items.indexOf(it), letters)).join('')}</div>
     </div>`;
   }).join('')}
@@ -433,6 +441,7 @@ function bindAuto(host, body) {
   $('#a-manual', body).addEventListener('click', () => { S.autoView = false; renderWork(host); });
   $('#a-save', body).addEventListener('click', guard(() => saveAuto(host)));
   $$('[data-td]', body).forEach(inp => inp.addEventListener('change', () => { const t = A.tests[+inp.dataset.td]; t.ders = inp.value.trim(); $(`#a-kl-${inp.dataset.td}`, body).innerHTML = konuList(t.ders).map(d => `<option value="${esc(d)}">`).join(''); }));
+  $$('[data-tb]', body).forEach(inp => inp.addEventListener('change', () => { const [ti, k] = inp.dataset.tb.split(':').map(Number); A.tests[ti].bolumler[k].ders = inp.value.trim(); }));
   $$('[data-tk]', body).forEach(inp => inp.addEventListener('input', () => { A.tests[+inp.dataset.tk].konu = inp.value; }));
   $$('[data-tz]', body).forEach(seg => $$('button', seg).forEach(b => b.addEventListener('click', () => { A.tests[+seg.dataset.tz].zorluk = b.dataset.z; $$('button', seg).forEach(x => x.classList.toggle('on', x === b)); })));
   $$('[data-ta]', body).forEach(inp => attachKeyOcr(inp, {
@@ -479,7 +488,7 @@ function bindAuto(host, body) {
       it.include = false;
       const t = A.tests[it.test];
       const idx = S.pages.findIndex(p => p.src === A.src && p.index === it.q.page + 1);
-      S.ders = t.ders || S.ders; S.konu = it.konu || t.konu || S.konu; S.zorluk = t.zorluk; S.cevap = it.cevap; S.yatay = it.yatay; S.yatayManual = true;
+      S.ders = itemDers(t, it) || S.ders; S.konu = it.konu || t.konu || S.konu; S.zorluk = t.zorluk; S.cevap = it.cevap; S.yatay = it.yatay; S.yatayManual = true;
       S.autoView = false;
       await showPage(host, idx);
       const r = it.q.rect, k = S.canvas.width / it.pw;
@@ -496,7 +505,12 @@ async function saveAuto(host) {
   if (!list.length) return;
   for (const [ti, t] of A.tests.entries()) {
     if (!list.some(i => i.test === ti)) continue;
-    if (!t.ders) { toast(`${testLabel(t, ti)}: ders seçin.`, 'err'); const el = $(`[data-td="${ti}"]`, host); el && el.focus(); return; }
+    const dersiz = list.find(i => i.test === ti && !itemDers(t, i));
+    if (dersiz) {
+      const bk = t.bolumler ? t.bolumler.findIndex(b => dersiz.n >= b.from && dersiz.n <= b.to) : -1;
+      toast(`${testLabel(t, ti)}: ${bk >= 0 ? `"${t.bolumler[bk].ad}" bölümünün dersini seçin.` : 'ders seçin.'}`, 'err');
+      const el = $(bk >= 0 ? `[data-tb="${ti}:${bk}"]` : `[data-td="${ti}"]`, host); el && el.focus(); return;
+    }
     const eksik = list.filter(i => i.test === ti && !(i.konu.trim() || t.konu.trim()));
     if (eksik.length) { toast(`${testLabel(t, ti)}: konu yazın (testin geneli için ya da soru bazında).`, 'err'); const el = $(`[data-tk="${ti}"]`, host); el && el.focus(); return; }
   }
@@ -505,8 +519,9 @@ async function saveAuto(host) {
   const base = A.src.name.replace(/\.[^.]+$/, '').replace(/[^\wçğıöşüÇĞİÖŞÜ-]+/g, '_').slice(0, 24);
   const qs = list.map(it => {
     const t = A.tests[it.test];
-    const kisa = ((t.ders || 'test').split(/\s+/).map(w => w.replace(/[^\wçğıöşüÇĞİÖŞÜ]/g, '')).find(w => w.length > 2) || 'test').slice(0, 10);
-    return { it, q: newQuestion({ ders: t.ders, konu: (it.konu.trim() || t.konu.trim()), zorluk: t.zorluk, ad: `${base}_${kisa}_${String(it.n).padStart(2, '0')}${it.cevap ? '_' + it.cevap.toLowerCase() : ''}.png`, cevap: it.cevap, yatay: it.yatay, blob: it.blob, w: it.w, h: it.h, mmw: it.mmw, kaynak: A.src.name }) };
+    const ders = itemDers(t, it);
+    const kisa = ((ders || 'test').split(/\s+/).map(w => w.replace(/[^\wçğıöşüÇĞİÖŞÜ]/g, '')).find(w => w.length > 2) || 'test').slice(0, 10);
+    return { it, q: newQuestion({ ders, konu: (it.konu.trim() || t.konu.trim()), zorluk: t.zorluk, ad: `${base}_${kisa}_${String(it.n).padStart(2, '0')}${it.cevap ? '_' + it.cevap.toLowerCase() : ''}.png`, cevap: it.cevap, yatay: it.yatay, blob: it.blob, w: it.w, h: it.h, mmw: it.mmw, kaynak: A.src.name }) };
   });
   // Aynı oturumda isim çakışmasını önlemek için tek tek kaydet (uniqueName kayıtlı soruları görür)
   const pg = progress('Bankaya kaydediliyor');
