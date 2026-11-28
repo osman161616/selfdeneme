@@ -559,3 +559,6 @@ function readingOrder(items, numbered = false) {
   }
   return rows.flatMap(r => r.items);
 }
+
+/** Tek bir karakteri tanı (taranmış sayfalarda soru numarası okumak için): get(x, y) → 0/1 */
+export function classifyGlyph(get, x0, y0, w, h) { return classify(get, x0, y0, w, h); }

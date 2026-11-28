@@ -268,11 +268,26 @@ async function runAuto(host, src) {
       pages.push({ w, h, items, imgs });
       pg.set(i / doc.numPages * 0.25, `Sayfa ${i}/${doc.numPages} okunuyor`);
     }
-    const res = detectQuestions(pages);
+    let res = detectQuestions(pages);
+    if (res.noText) {
+      // Metin katmanı yok: sayfa görüntülerinden yerleşim çıkar (taranmış kitap, yazısı çizgiye dönüştürülmüş PDF)
+      const { scanPage } = await import('../scanlayout.js');
+      for (let i = 0; i < pages.length; i++) {
+        pg.set(0.25 * i / pages.length, `Sayfa ${i + 1}/${pages.length} görüntüden okunuyor`);
+        const sc = 1300 / pages[i].w;
+        const c = await renderPage(await doc.getPage(i + 1), sc);
+        const r = scanPage(c, sc);
+        pages[i].items = r.items; pages[i].imgs = r.imgs; pages[i].scan = true;
+        c.width = 1; c.height = 1;
+      }
+      res = detectQuestions(pages);
+      if (res.questions.length) res.warnings = ['Bu PDF\'te metin katmanı yok; sorular sayfa görüntüsünden bulundu. Kesimleri bir kez gözden geçirin.', ...(res.warnings || [])];
+      else res.noText = true;
+    }
     if (!res.questions.length) {
       pg.close();
       await alertDlg(res.noText
-        ? 'Bu PDF taranmış (fotoğraf/tarama) bir belge; içinde metin katmanı yok. Otomatik kesme yalnızca bilgisayarda hazırlanmış PDF\'lerde çalışır. Bu dosyadaki soruları elle kesebilirsiniz.'
+        ? 'Bu PDF taranmış bir belge ve sayfa görüntülerinde de düzenli soru numarası ("1.", "2." …) seçilemedi. Tarama çok bulanık ya da eğik olabilir. Bu dosyadaki soruları elle kesebilirsiniz.'
         : 'Bu PDF\'te düzenli soru numarası ("1.", "2." …) bulunamadı. Soruları elle kesebilirsiniz.', 'Otomatik kesme yapılamadı');
       return;
     }
@@ -296,19 +311,36 @@ async function runAuto(host, src) {
     }
     const crops = new Map(), stemC = new Map();
     const stems = res.stems || [];
-    const allPages = [...new Set([...byPage.keys(), ...stems.map(st => st.page)])].sort((a, b) => a - b);
+    // Sütun/sayfa sonunda devam eden soruların devam parçaları
+    const conts = res.questions.flatMap(q => (q.cont || []).map(part => ({ q, part })));
+    const contC = new Map();
+    const pending = [];
+    const finish = async (q, cv) => {
+      for (const part of q.cont || []) { const pc = contC.get(part); if (pc) cv = stackStem(cv, pc, Math.round(3 * scale)); }
+      if (q.stem >= 0 && stemC.has(q.stem)) cv = stackStem(stemC.get(q.stem), cv, Math.round(8 * scale));
+      const blob = await canvasToBlob(cv, 'image/png');
+      crops.set(q, { blob, w: cv.width, h: cv.height, mmw: +(cv.width / scale * 25.4 / 72).toFixed(2) });
+    };
+    const allPages = [...new Set([...byPage.keys(), ...stems.map(st => st.page), ...conts.map(x => x.part.page)])].sort((a, b) => a - b);
     let k = 0;
     for (const pi of allPages) {
       const c = await renderPage(await doc.getPage(pi + 1), scale);
       stems.forEach((st, si) => { if (st.page === pi) stemC.set(si, cropQuestion(c, st, scale, { watermark: wm, trim: trimCanvas })); });
+      conts.forEach(x => { if (x.part.page === pi) contC.set(x.part, cropQuestion(c, x.part, scale, { watermark: wm, trim: trimCanvas })); });
       for (const q of byPage.get(pi) || []) {
-        let cv = cropQuestion(c, q, scale, { watermark: wm, trim: trimCanvas });
-        if (q.stem >= 0 && stemC.has(q.stem)) cv = stackStem(stemC.get(q.stem), cv, Math.round(8 * scale));
-        const blob = await canvasToBlob(cv, 'image/png');
-        crops.set(q, { blob, w: cv.width, h: cv.height, mmw: +(cv.width / scale * 25.4 / 72).toFixed(2) });
+        const cv = cropQuestion(c, q, scale, { watermark: wm, trim: trimCanvas });
+        if ((q.cont || []).some(part => !contC.has(part))) pending.push({ q, cv });
+        else await finish(q, cv);
       }
+      for (let j = pending.length - 1; j >= 0; j--) {
+        const { q, cv } = pending[j];
+        if ((q.cont || []).every(part => contC.has(part))) { pending.splice(j, 1); await finish(q, cv); }
+      }
+      // Kullanılmış devam parçalarını bırak
+      for (const [part] of contC) if (part.page < pi) contC.delete(part);
       k++; pg.set(0.25 + 0.75 * k / allPages.length, `Sorular kesiliyor (${k}/${allPages.length} sayfa)`);
     }
+    for (const { q, cv } of pending) await finish(q, cv);
     const dersler = knownDersler();
     const old = S.auto && S.auto.src === src ? S.auto : null;
     freeAuto();
